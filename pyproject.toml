@@ -12,5 +12,17 @@ dependencies = [
 
 
 
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["skills_mcp*"]
+
+[project.scripts]
+skills-mcp = "skills_mcp.server:run"
+skills-mcp-cli = "skills_mcp.server:cli_main"
+
 [tool.uv]
-package = false
+package = true

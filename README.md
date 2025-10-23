@@ -6,7 +6,7 @@ The server entrypoint is `mcp_server.py`. It scans the `skills/` directory for `
 
 ## Repository layout
 
-- `skills/` — Collection of Claude skills. Each skill must contain a `SKILL.md` with YAML frontmatter per the Agent Skills Spec.
+- `skills/` — Collection of Claude skills. Each skill must contain a `SKILL.md` with YAML frontmatter per the Agent Skills Spec. Note: this folder is gitignored by default; the server can optionally git-sync it at startup.
 - `mcp_server.py` — FastMCP server that exposes skill discovery/search/read as MCP tools over stdio.
 - `pyproject.toml` — Project metadata and dependencies (managed via `uv`).
 
@@ -30,6 +30,7 @@ You can either fully sync dependencies from `pyproject.toml` or install in edita
   - Then activate:
   - `source .venv/bin/activate.fish`
 
+Package name: skills-mcp
 The server depends on:
 - `fastmcp`
 - `pyyaml`
@@ -41,8 +42,22 @@ Both are declared in `pyproject.toml`.
 The server uses stdio transport by default when executed as a script. From the repository root:
 
 - `python skills-mcp/mcp_server.py`
+- Or via console script after editable install: `skills-mcp` (starts stdio server)
+- CLI/inspection mode: `skills-mcp-cli --list` | `--detail <NAME>` | `--search "<QUERY>"` | `--assets <NAME>` | `--read <NAME> <PATH>` | `--serve`
+- Or with module: `python -m skills_mcp.server` (use flags above)
 
 When launched by an MCP client (e.g., Claude Desktop), the client will spawn this script and connect via stdio automatically.
+
+## Server-level documentation
+
+- Name: ClaudeSkills MCP Server
+- Purpose: Exposes Anthropic Claude Agent Skills located in the `skills/` folder as MCP tools so agents can discover, search, and read skill guidance and assets.
+- Transport: stdio by default.
+- Background git sync: On startup, a background thread can clone or pull updates into `skills/`. Configure via environment:
+  - `SKILLS_GIT_URL`: git URL for the skills repository (optional)
+  - `SKILLS_GIT_BRANCH`: branch name (default: `main`)
+  - `SKILLS_DIR`: override skills directory (default: `<repo_root>/skills`)
+- Logging: Logs to console and to a rotating file at `logs/skills_mcp_server.log` by default. Override with `LOG_FILE` environment variable.
 
 ## Exposed MCP tools
 
@@ -105,9 +120,14 @@ If parsing fails, the server still returns a placeholder entry for the skill and
 ## Development notes
 
 - Transport: stdio is the default; no extra configuration required.
-- Logging: basic logging is enabled; errors parsing invalid skills are reported but do not stop discovery.
+- Logging: console and rotating file logs at `logs/skills_mcp_server.log` (configurable via `LOG_FILE`); errors parsing invalid skills are reported but do not stop discovery.
 - Security: asset reads are constrained to the skill directory; path traversal is rejected.
 - MIME types: `guess_type` is used as a best effort; some uncommon types may return `None`.
+
+## Tests
+
+- After creating the venv and syncing deps, run: `pytest -q`.
+- Tests live in `tests/` and cover discovery, detail retrieval, asset listing/reading.
 
 ## Troubleshooting
 

@@ -352,6 +352,134 @@ def read_skill_asset(
         }
 
 
-if __name__ == "__main__":
-    # Run as STDIO server (default transport)
+def _cli_main() -> None:
+    import argparse
+    import json
+
+    parser = argparse.ArgumentParser(
+        prog="mcp_server.py",
+        description="Inspect Claude skills (Agent Skills Spec) without starting the MCP stdio server.",
+    )
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="List all discovered skills and exit",
+    )
+    parser.add_argument(
+        "--detail",
+        metavar="NAME",
+        help="Show full details (frontmatter + body) for a specific skill name",
+    )
+    parser.add_argument(
+        "--search",
+        metavar="QUERY",
+        help="Search skills by substring across name, description, and body",
+    )
+    parser.add_argument(
+        "--assets",
+        metavar="NAME",
+        help="List non-SKILL.md assets within the given skill",
+    )
+    parser.add_argument(
+        "--read",
+        nargs=2,
+        metavar=("NAME", "PATH"),
+        help="Read an asset file PATH within the given skill NAME",
+    )
+    parser.add_argument(
+        "--max-bytes",
+        type=int,
+        default=1_048_576,
+        help="Maximum bytes to read for binary/text assets (default: 1048576)",
+    )
+
+    args = parser.parse_args()
+
+    if args.list:
+        skills = discover_skills()
+        result = [
+            {
+                k: v
+                for k, v in s.items()
+                if k
+                in {
+                    "name",
+                    "description",
+                    "license",
+                    "allowed_tools",
+                    "metadata",
+                    "path",
+                }
+            }
+            for s in skills
+        ]
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        return
+
+    if args.detail:
+        print(json.dumps(get_skill(args.detail), indent=2, ensure_ascii=False))
+        return
+
+    if args.search:
+        print(json.dumps(search_skills(args.search), indent=2, ensure_ascii=False))
+        return
+
+    if args.assets:
+        sdir = _skill_dir(args.assets)
+        assets: list[dict[str, Any]] = []
+        for f in list_files_under(sdir):
+            if f.name == "SKILL.md":
+                continue
+            rel = f.relative_to(sdir).as_posix()
+            try:
+                size = f.stat().st_size
+            except OSError:
+                size = None
+            mime, _ = guess_type(f.name)
+            assets.append({"path": rel, "size": size, "mime_type": mime})
+        assets.sort(key=lambda x: x["path"])
+        print(json.dumps(assets, indent=2, ensure_ascii=False))
+        return
+
+    if args.read:
+        name, rel_path = args.read
+        sdir = _skill_dir(name)
+        file_path = (sdir / rel_path).resolve()
+        # Prevent path traversal
+        if sdir not in file_path.parents and file_path != sdir:
+            raise ValueError("path must be within the skill directory")
+        if not file_path.exists() or not file_path.is_file():
+            raise ValueError(f"file not found: {rel_path}")
+
+        mime, _ = guess_type(file_path.name)
+        raw = file_path.read_bytes()
+        truncated = False
+        if len(raw) > args.max_bytes:
+            raw = raw[: args.max_bytes]
+            truncated = True
+
+        if _is_text_data(raw, mime):
+            data = raw.decode("utf-8", errors="replace")
+            payload = {
+                "encoding": "text",
+                "data": data,
+                "mime_type": mime,
+                "truncated": truncated,
+            }
+        else:
+            b64 = base64.b64encode(raw).decode("ascii")
+            payload = {
+                "encoding": "base64",
+                "data": b64,
+                "mime_type": mime,
+                "truncated": truncated,
+            }
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+
+    # Fallback: start the MCP server over stdio
     mcp.run()
+
+
+if __name__ == "__main__":
+    _cli_main()
