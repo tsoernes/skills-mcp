@@ -2,12 +2,12 @@
 
 This repository provides a FastMCP stdio server that exposes the Anthropic Claude Agent Skills (folders under `skills/`) as MCP tools. It lets MCP-aware clients (e.g., Claude Desktop, other MCP agent runtimes) discover, search, and read skills and their assets programmatically.
 
-The server entrypoint is `mcp_server.py`. It scans the `skills/` directory for `SKILL.md` files conforming to the Agent Skills Spec (YAML frontmatter + Markdown body) and exposes a set of read-only tools.
+The server entrypoint is the packaged module `skills_mcp.server` (console script `skills-mcp`). It scans the `skills/` directory for `SKILL.md` files conforming to the Agent Skills Spec (YAML frontmatter + Markdown body) and exposes a set of read-only tools.
 
 ## Repository layout
 
 - `skills/` — Collection of Claude skills. Each skill must contain a `SKILL.md` with YAML frontmatter per the Agent Skills Spec. Note: this folder is gitignored by default; the server can optionally git-sync it at startup.
-- `mcp_server.py` — FastMCP server that exposes skill discovery/search/read as MCP tools over stdio.
+- `skills_mcp/` — Packaged server module (entry: `skills_mcp.server`) exposing skill discovery/search/read as MCP tools over stdio.
 - `pyproject.toml` — Project metadata and dependencies (managed via `uv`).
 
 ## Requirements
@@ -41,7 +41,7 @@ Both are declared in `pyproject.toml`.
 
 The server uses stdio transport by default when executed as a script. From the repository root:
 
-- `python skills-mcp/mcp_server.py`
+- `python -m skills_mcp.server`
 - Or via console script after editable install: `skills-mcp` (starts stdio server)
 - CLI/inspection mode: `skills-mcp-cli --list` | `--detail <NAME>` | `--search "<QUERY>"` | `--assets <NAME>` | `--read <NAME> <PATH>` | `--serve`
 - Or with module: `python -m skills_mcp.server` (use flags above)
@@ -93,11 +93,11 @@ Notes:
 
 ## Claude Desktop / MCP client integration
 
-- Configure your MCP client to launch the server script `skills-mcp/mcp_server.py` via stdio.
+- Configure your MCP client to launch the console script `skills-mcp` (or run `python -m skills_mcp.server`) via stdio.
 - If your client supports a configuration object for MCP servers, specify:
   - `transport`: `stdio`
   - `command`: `python`
-  - `args`: `["skills-mcp/mcp_server.py"]`
+  - `args`: `["-m", "skills_mcp.server"]`
   - Optionally `cwd`: repository root
   - Optionally `env`: relevant environment variables (none required by default)
 
