@@ -136,7 +136,9 @@ def _git_sync(skills_dir: Path, logger: logging.Logger) -> None:
     - If not a repo and SKILLS_GIT_URL is set: clone depth=1 on branch.
     - If neither condition applies: skip with info.
     """
-    git_url = os.environ.get("SKILLS_GIT_URL", "").strip()
+    git_url = (
+        os.environ.get("SKILLS_GIT_URL") or "https://github.com/anthropics/skills"
+    ).strip()
     branch = os.environ.get("SKILLS_GIT_BRANCH", "main").strip()
 
     if _is_git_repo(skills_dir):
@@ -479,7 +481,53 @@ def _server_description() -> str:
     )
 
 
-mcp = FastMCP(SERVER_NAME)
+mcp = FastMCP(
+    SERVER_NAME,
+    instructions=(
+        "ClaudeSkills MCP Server\n"
+        "\n"
+        "Purpose:\n"
+        "- Expose Anthropic Claude Agent Skills located in the 'skills/' folder as MCP tools so agents can\n"
+        "  discover, search, and read skill guidance and assets programmatically.\n"
+        "\n"
+        "Why use it:\n"
+        "- Agents can list skills with descriptions and metadata\n"
+        "- Fetch full skill documents (frontmatter + markdown body)\n"
+        "- Search across skills (name, description, and markdown body)\n"
+        "- Enumerate and read skill assets safely with path traversal protection and size limits\n"
+        "- Automatically keep skills up to date via background git sync on startup\n"
+        "\n"
+        "Transports:\n"
+        "- STDIO by default (ideal for MCP clients that spawn a server process)\n"
+        "\n"
+        "Startup behavior:\n"
+        "- Background git sync of 'skills' directory: if it's a git repo, fetch/pull; otherwise shallow clone\n"
+        "  using SKILLS_GIT_URL (default https://github.com/anthropics/skills) and SKILLS_GIT_BRANCH (default 'main').\n"
+        "\n"
+        "Environment configuration:\n"
+        "- SKILLS_GIT_URL       : git URL for skills repo (default: https://github.com/anthropics/skills)\n"
+        "- SKILLS_GIT_BRANCH    : git branch to pull/clone (default: main)\n"
+        "- SKILLS_DIR           : override skills directory (default: <repo_root>/skills)\n"
+        "- LOG_FILE             : override rotating log file path (default: <repo_root>/logs/skills_mcp_server.log)\n"
+        "\n"
+        "Safety & limits:\n"
+        "- Asset reads reject path traversal and cap bytes via 'max_bytes' (default 1 MiB). Text vs binary detection\n"
+        "  uses MIME type and UTF-8 decodability; returns either text or base64 content.\n"
+        "\n"
+        "Exposed tools:\n"
+        "- server_info(): server name, description, skills_dir, transport\n"
+        "- list_skills(): brief skill metadata (name, description, license?, allowed_tools?, metadata?, path)\n"
+        "- get_skill_detail(name): full parsed frontmatter + markdown body for a skill\n"
+        "- search_skill_index(query): substring search across name/description/body, returns brief matches\n"
+        "- list_skill_assets_tool(name): non-SKILL.md files inside a skill (path, size, mime_type)\n"
+        "- read_skill_asset_tool(name, path, max_bytes): read an asset within a skill (text/base64 + mime_type + truncated)\n"
+        "\n"
+        "Notes:\n"
+        "- Skills must adhere to Agent Skills Spec (SKILL.md with YAML frontmatter: name, description).\n"
+        "- Immediate directory name must match 'name' in frontmatter (e.g., document-skills/docx with name: docx).\n"
+        "- Invalid SKILL.md entries are surfaced with error diagnostics in metadata but do not stop discovery.\n"
+    ),
+)
 
 
 @mcp.tool
@@ -487,7 +535,18 @@ def server_info() -> dict[str, Any]:
     """
     function_purpose: Return server-level documentation including purpose and usage.
 
-    Provides: name, description, skills_dir, transport.
+    Description:
+    - Provides an overview of the ClaudeSkills MCP Server, its transport mode, and where skills are loaded from.
+    - Useful for clients to show contextual info and help users understand capabilities and configuration.
+
+    Returns:
+    - name: str                    Server name
+    - description: str             High-level description of server purpose and capabilities
+    - skills_dir: str              Absolute path to the skills directory in use
+    - transport: str               Transport used by the server (e.g., "stdio")
+
+    Usage:
+    - Call this tool once when connecting, then cache/show details in the client UI or logs.
     """
     skills_dir = _resolve_skills_dir()
     return {
@@ -503,7 +562,21 @@ def list_skills() -> list[dict[str, Any]]:
     """
     function_purpose: List available skills with brief metadata (excluding body).
 
-    Returns entries containing name, description, license?, allowed_tools?, metadata?, path.
+    Description:
+    - Enumerates all discovered skills from the skills directory and returns summary metadata.
+    - Excludes the markdown body for compact listing; use get_skill_detail for full content.
+
+    Returns:
+    - List of dict entries containing:
+      - name: str
+      - description: str
+      - license: str | None
+      - allowed_tools: list[str] | None
+      - metadata: dict[str, Any] | None
+      - path: str (relative path to SKILL.md within skills dir)
+
+    Usage:
+    - Use this to present a catalog of available skills to the agent or user.
     """
     skills_dir = _resolve_skills_dir()
     skills = discover_skills(skills_dir)
@@ -522,6 +595,19 @@ def list_skills() -> list[dict[str, Any]]:
 def get_skill_detail(name: str) -> dict[str, Any]:
     """
     function_purpose: Get full parsed details for a specific skill by name (frontmatter + body).
+
+    Description:
+    - Returns the complete parsed skill including frontmatter fields and the markdown body content.
+
+    Args:
+    - name: str  The hyphen-case name of the skill (must match the skill directory name)
+
+    Returns:
+    - dict containing:
+      - name, description, license?, allowed_tools?, metadata?, path, body (markdown)
+
+    Usage:
+    - Use this when the agent needs the full guidance text and metadata for a skill.
     """
     skills_dir = _resolve_skills_dir()
     return get_skill(skills_dir, name)
@@ -531,6 +617,21 @@ def get_skill_detail(name: str) -> dict[str, Any]:
 def search_skill_index(query: str) -> list[dict[str, Any]]:
     """
     function_purpose: Search skills by case-insensitive substring across name, description, and body.
+
+    Description:
+    - Performs a simple substring search across the parsed name, description, and body for each skill.
+
+    Args:
+    - query: str (case-insensitive substring)
+
+    Returns:
+    - List of brief matches with:
+      - name: str
+      - description: str
+      - path: str (relative to skills dir)
+
+    Usage:
+    - Use this to quickly locate relevant skills by topic or keywords.
     """
     skills_dir = _resolve_skills_dir()
     return search_skills(skills_dir, query)
@@ -540,6 +641,23 @@ def search_skill_index(query: str) -> list[dict[str, Any]]:
 def list_skill_assets_tool(name: str) -> list[dict[str, Any]]:
     """
     function_purpose: List non-SKILL.md files within a skill folder (recursive).
+
+    Description:
+    - Enumerates files inside a specific skill directory, excluding SKILL.md, recursively.
+    - Useful for discovering supporting artifacts, reference materials, templates, and helper scripts that belong to a skill.
+
+    Args:
+    - name: str  The hyphen-case name of the skill whose assets to list.
+
+    Returns:
+    - list[dict[str, Any]] containing:
+      - path: str        Relative path within the skill directory
+      - size: int | None File size in bytes if available
+      - mime_type: str | None  Best-effort MIME type guess
+
+    Usage:
+    - Call before reading assets to present available files to the agent or user.
+    - For reading actual content, use read_skill_asset_tool() with the returned path.
     """
     skills_dir = _resolve_skills_dir()
     return list_skill_assets(skills_dir, name)
@@ -551,6 +669,26 @@ def read_skill_asset_tool(
 ) -> dict[str, Any]:
     """
     function_purpose: Read a specific asset file within a skill (returns text or base64 data).
+
+    Description:
+    - Safely reads an asset inside a skill directory, preventing path traversal and limiting size via max_bytes.
+    - Returns UTF-8 text when possible, otherwise base64-encoded bytes, including a MIME type guess and truncation flag.
+
+    Args:
+    - name: str       The hyphen-case skill name (must match skill directory)
+    - path: str       Relative file path within the skill directory
+    - max_bytes: int  Maximum number of bytes to read (default: 1_048_576)
+
+    Returns:
+    - dict[str, Any] with:
+      - encoding: "text" | "base64"
+      - data: str                 UTF-8 text or base64 string
+      - mime_type: str | None     Best-effort MIME type guess
+      - truncated: bool           True if content was cut at max_bytes
+
+    Usage:
+    - Use after listing assets to fetch the content of a specific file for analysis or display.
+    - If the asset is large, consider increasing max_bytes or reading only required portions.
     """
     skills_dir = _resolve_skills_dir()
     return read_skill_asset(skills_dir, name, path, max_bytes)
