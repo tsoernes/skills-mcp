@@ -775,6 +775,88 @@ def store_skill_note(name: str, title: str, content: str) -> dict[str, Any]:
         return {"path": "", "created": False, "message": f"Failed to store note: {exc}"}
 
 
+@mcp.tool
+def list_skill_notes(name: str) -> list[dict[str, Any]]:
+    """
+    function_purpose: List notes created under a skill’s _notes directory.
+
+    Description:
+    - Enumerates note files stored under a skill’s '_notes' directory. Notes are additive records of
+      learnings, improvements, and scripts created via store_skill_note(), intended to refine or clarify
+      skills over time without editing existing files.
+
+    Args:
+    - name: str  The hyphen-case skill name (must match the skill directory)
+
+    Returns:
+    - list[dict[str, Any]] with:
+      - path: str             Relative path to the note within the skill directory (e.g., "_notes/2025...-title.md")
+      - size: int | None      File size in bytes
+      - title: str | None     Note title if present in frontmatter
+      - created_at: str | None ISO-like timestamp from frontmatter if present
+      - kind: str | None      "note" when created by store_skill_note()
+
+    Usage:
+    - Use this to browse available notes and select one to read with read_skill_asset_tool().
+    """
+    skills_dir = _resolve_skills_dir()
+    sdir = skill_dir_for_name(skills_dir, name)
+    notes_dir = sdir / "_notes"
+    results: list[dict[str, Any]] = []
+    if not notes_dir.exists():
+        return results
+
+    for f in notes_dir.rglob("*"):
+        if not f.is_file():
+            continue
+        rel = f.relative_to(sdir).as_posix()
+        try:
+            size = f.stat().st_size
+        except OSError:
+            size = None
+
+        title: str | None = None
+        created_at: str | None = None
+        kind: str | None = None
+
+        # Best-effort parse of YAML frontmatter if present
+        try:
+            txt = f.read_text(encoding="utf-8")
+            lines = txt.splitlines(keepends=False)
+            if lines and lines[0].strip() == "---":
+                fm_lines: list[str] = []
+                idx = 1
+                while idx < len(lines) and lines[idx].strip() != "---":
+                    fm_lines.append(lines[idx])
+                    idx += 1
+                if idx < len(lines) and lines[idx].strip() == "---":
+                    fm = yaml.safe_load("\n".join(fm_lines)) or {}
+                    if isinstance(fm, dict):
+                        t = fm.get("title")
+                        ca = fm.get("created_at")
+                        k = fm.get("kind")
+                        title = t if isinstance(t, str) else None
+                        created_at = ca if isinstance(ca, str) else None
+                        kind = k if isinstance(k, str) else None
+        except Exception:
+            # Ignore parsing errors; still include the file in results
+            pass
+
+        results.append(
+            {
+                "path": rel,
+                "size": size,
+                "title": title,
+                "created_at": created_at,
+                "kind": kind,
+            }
+        )
+
+    # Stable ordering by path
+    results.sort(key=lambda x: x.get("path") or "")
+    return results
+
+
 # --- Entry points ---
 def run() -> None:
     """
