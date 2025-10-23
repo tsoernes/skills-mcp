@@ -414,7 +414,7 @@ def read_skill_asset(
     skills_dir: Path,
     name: str,
     rel_path: str,
-    max_bytes: int = 1_048_576,
+    max_bytes: int = 8_388_608,
 ) -> dict[str, Any]:
     """
     function_purpose: Safely read a file within a skill directory, returning text or base64 data.
@@ -511,7 +511,7 @@ mcp = FastMCP(
         "- LOG_FILE             : override rotating log file path (default: <repo_root>/logs/skills_mcp_server.log)\n"
         "\n"
         "Safety & limits:\n"
-        "- Asset reads reject path traversal and cap bytes via 'max_bytes' (default 1 MiB). Text vs binary detection\n"
+        "- Asset reads reject path traversal and cap bytes via 'max_bytes' (default 8 MiB). Text vs binary detection\n"
         "  uses MIME type and UTF-8 decodability; returns either text or base64 content.\n"
         "\n"
         "Exposed tools:\n"
@@ -665,7 +665,7 @@ def list_skill_assets_tool(name: str) -> list[dict[str, Any]]:
 
 @mcp.tool
 def read_skill_asset_tool(
-    name: str, path: str, max_bytes: int = 1_048_576
+    name: str, path: str, max_bytes: int = 8_388_608
 ) -> dict[str, Any]:
     """
     function_purpose: Read a specific asset file within a skill (returns text or base64 data).
@@ -677,7 +677,7 @@ def read_skill_asset_tool(
     Args:
     - name: str       The hyphen-case skill name (must match skill directory)
     - path: str       Relative file path within the skill directory
-    - max_bytes: int  Maximum number of bytes to read (default: 1_048_576)
+    - max_bytes: int  Maximum number of bytes to read (default: 8_388_608)
 
     Returns:
     - dict[str, Any] with:
@@ -692,6 +692,85 @@ def read_skill_asset_tool(
     """
     skills_dir = _resolve_skills_dir()
     return read_skill_asset(skills_dir, name, path, max_bytes)
+
+
+@mcp.tool
+def store_skill_note(name: str, title: str, content: str) -> dict[str, Any]:
+    """
+    function_purpose: Append a new note to a skill capturing learnings, improvements, and scripts.
+
+    Description:
+    - Safely stores additive notes related to a skill (no edits to existing files). Use this to record
+      observations, corrections, suggested improvements, and example scripts discovered while using the skill.
+    - Encourages iterative refinement: if documentation turns out inaccurate or incomplete, add a note that
+      clarifies, extends, or proposes better approaches. Over time, these notes can guide maintainers to
+      improve the canonical SKILL.md.
+
+    Constraints:
+    - Additions only. This tool never edits existing files; it only creates new note files.
+    - Notes are stored under a dedicated '_notes' directory within the skill folder.
+
+    Args:
+    - name: str    The hyphen-case skill name (must match skill directory)
+    - title: str   A short, descriptive title for the note
+    - content: str The body of the note (Markdown supported)
+
+    Returns:
+    - dict[str, Any] with:
+      - path: str         Relative path to the created note within the skill directory
+      - created: bool     True on success
+      - message: str      Status message
+    """
+    from datetime import datetime
+
+    skills_dir = _resolve_skills_dir()
+    sdir = skill_dir_for_name(skills_dir, name)
+    notes_dir = sdir / "_notes"
+    notes_dir.mkdir(parents=True, exist_ok=True)
+
+    # Simple slugification for filename safety
+    def _slugify(text: str) -> str:
+        cleaned = []
+        for ch in text.strip():
+            if ch.isalnum():
+                cleaned.append(ch.lower())
+            elif ch in (" ", "-", "_"):
+                cleaned.append("-")
+            else:
+                cleaned.append("")
+        slug = "".join(cleaned).strip("-")
+        return slug or "note"
+
+    ts = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    slug = _slugify(title)[:80]
+    filename = f"{ts}-{slug}.md"
+    note_path = notes_dir / filename
+
+    # Exclusive create to prevent overwrites
+    fm = [
+        "---",
+        f'title: "{title}"',
+        f"created_at: {ts}",
+        "kind: note",
+        "---",
+        "",
+    ]
+    body = "\n".join(fm) + content.rstrip() + "\n"
+
+    try:
+        with open(note_path, "x", encoding="utf-8") as f:
+            f.write(body)
+        rel = note_path.relative_to(sdir).as_posix()
+        return {"path": rel, "created": True, "message": "Note stored"}
+    except FileExistsError:
+        # Extremely unlikely due to timestamp; retry with suffix
+        alt = notes_dir / f"{ts}-{slug}-1.md"
+        with open(alt, "x", encoding="utf-8") as f:
+            f.write(body)
+        rel = alt.relative_to(sdir).as_posix()
+        return {"path": rel, "created": True, "message": "Note stored (with suffix)"}
+    except Exception as exc:
+        return {"path": "", "created": False, "message": f"Failed to store note: {exc}"}
 
 
 # --- Entry points ---
@@ -750,7 +829,7 @@ def cli_main() -> None:
     parser.add_argument(
         "--max-bytes",
         type=int,
-        default=1_048_576,
+        default=8_388_608,
         help="Maximum bytes to read for assets",
     )
     parser.add_argument(
