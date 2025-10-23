@@ -496,6 +496,8 @@ mcp = FastMCP(
         "- Search across skills (name, description, and markdown body)\n"
         "- Enumerate and read skill assets safely with path traversal protection and size limits\n"
         "- Automatically keep skills up to date via background git sync on startup\n"
+        "- When you discover corrections, better examples, or scripts, use store_skill_note(name, title, content)\n"
+        "  to append a note under the skill (additions only) so future improvements can be incorporated.\n"
         "\n"
         "Transports:\n"
         "- STDIO by default (ideal for MCP clients that spawn a server process)\n"
