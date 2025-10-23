@@ -1,0 +1,16 @@
+[project]
+name = "skills-mcp"
+version = "0.1.0"
+description = "FastMCP stdio server exposing Claude Agent Skills as MCP tools"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Skills MCP" }]
+dependencies = [
+  "fastmcp",
+  "pyyaml",
+]
+
+
+
+[tool.uv]
+package = false
