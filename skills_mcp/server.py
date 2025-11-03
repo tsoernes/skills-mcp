@@ -524,6 +524,8 @@ mcp = FastMCP(
         "- list_skill_assets_tool(name): non-SKILL.md files inside a skill (path, size, mime_type)\n"
         "- read_skill_asset_tool(name, path, max_bytes): read an asset within a skill (text/base64 + mime_type + truncated)\n"
         "- create_skill(name, description, body?, license?, allowed_tools?, metadata?): create a new skill directory with SKILL.md\n"
+        "- add_skill_asset(name, path, content, encoding?, overwrite?): add a single asset file (text or base64) inside a skill\n"
+        "- add_skill_assets(name, assets, overwrite?): bulk add multiple asset files to a skill\n"
         "\n"
         "Notes:\n"
         "- Skills must adhere to Agent Skills Spec (SKILL.md with YAML frontmatter: name, description).\n"
@@ -798,6 +800,151 @@ def create_skill(
 
     rel = skill_path.relative_to(skills_dir).as_posix()
     return {"created": True, "path": rel, "message": "Skill created"}
+
+
+@mcp.tool
+def add_skill_asset(
+    name: str,
+    path: str,
+    content: str,
+    encoding: str = "text",
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """
+    function_purpose: Add (or optionally overwrite) a single asset file inside an existing skill directory.
+
+    Description:
+    - Writes a new file under the skill folder (creating parent directories) while enforcing path safety.
+    - Supports text (UTF-8) or base64 content for binary assets (e.g. PDFs, images).
+    - Will not overwrite existing files unless overwrite=True.
+
+    Args:
+    - name: str          Skill name (directory must already exist)
+    - path: str          Relative path inside the skill (e.g. "examples/foo.py")
+    - content: str       Text content or base64 string
+    - encoding: str      "text" (default) or "base64"
+    - overwrite: bool    Allow overwriting when True (default False)
+
+    Returns:
+    - dict with:
+      - written: bool
+      - path: str            Relative normalized path
+      - size: int | None
+      - message: str
+      - binary: bool
+    """
+    skills_dir = _resolve_skills_dir()
+    skill_root = skill_dir_for_name(skills_dir, name)
+
+    if not path or path.startswith("/") or ".." in path:
+        return {
+            "written": False,
+            "path": path,
+            "size": None,
+            "message": "Invalid path",
+            "binary": encoding == "base64",
+        }
+
+    target = (skill_root / path).resolve()
+    try:
+        if not str(target).startswith(str(skill_root.resolve())):
+            return {
+                "written": False,
+                "path": path,
+                "size": None,
+                "message": "Path traversal detected",
+                "binary": encoding == "base64",
+            }
+    except Exception:
+        return {
+            "written": False,
+            "path": path,
+            "size": None,
+            "message": "Path resolution failed",
+            "binary": encoding == "base64",
+        }
+
+    if target.exists() and not overwrite:
+        return {
+            "written": False,
+            "path": path,
+            "size": None,
+            "message": "File exists (set overwrite=True to replace)",
+            "binary": encoding == "base64",
+        }
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    binary = encoding == "base64"
+    try:
+        if binary:
+            import base64
+
+            raw = base64.b64decode(content)
+            with open(target, "wb") as f:
+                f.write(raw)
+            size = len(raw)
+        else:
+            with open(target, "w", encoding="utf-8") as f:
+                f.write(content)
+            size = target.stat().st_size
+    except Exception as exc:
+        return {
+            "written": False,
+            "path": path,
+            "size": None,
+            "message": f"Write failed: {exc}",
+            "binary": binary,
+        }
+
+    return {
+        "written": True,
+        "path": str(target.relative_to(skill_root)),
+        "size": size,
+        "message": "Asset written",
+        "binary": binary,
+    }
+
+
+@mcp.tool
+def add_skill_assets(
+    name: str,
+    assets: list[dict[str, Any]],
+    overwrite: bool = False,
+) -> list[dict[str, Any]]:
+    """
+    function_purpose: Bulk add multiple assets to a skill.
+
+    Description:
+    - Convenience wrapper over add_skill_asset for efficiency when scaffolding several files.
+    - Applies a shared overwrite policy (individual entries may still be rejected if invalid).
+
+    Args:
+    - name: str                   Skill name
+    - assets: list[dict]          Each: {path: str, content: str, encoding?: "text"|"base64"}
+    - overwrite: bool             Allow overwriting existing files
+
+    Returns:
+    - list of result dicts (see add_skill_asset).
+    """
+    results: list[dict[str, Any]] = []
+    for entry in assets:
+        p = entry.get("path")
+        c = entry.get("content", "")
+        enc = entry.get("encoding", "text")
+        if not isinstance(p, str) or not isinstance(c, str):
+            results.append(
+                {
+                    "written": False,
+                    "path": p or "",
+                    "size": None,
+                    "message": "Invalid asset entry",
+                    "binary": enc == "base64",
+                }
+            )
+            continue
+        results.append(add_skill_asset(name, p, c, enc, overwrite))
+    return results
 
 
 @mcp.tool
