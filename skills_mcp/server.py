@@ -523,6 +523,7 @@ mcp = FastMCP(
         "- search_skill_index(query): substring search across name/description/body, returns brief matches\n"
         "- list_skill_assets_tool(name): non-SKILL.md files inside a skill (path, size, mime_type)\n"
         "- read_skill_asset_tool(name, path, max_bytes): read an asset within a skill (text/base64 + mime_type + truncated)\n"
+        "- create_skill(name, description, body?, license?, allowed_tools?, metadata?): create a new skill directory with SKILL.md\n"
         "\n"
         "Notes:\n"
         "- Skills must adhere to Agent Skills Spec (SKILL.md with YAML frontmatter: name, description).\n"
@@ -694,6 +695,109 @@ def read_skill_asset_tool(
     """
     skills_dir = _resolve_skills_dir()
     return read_skill_asset(skills_dir, name, path, max_bytes)
+
+
+@mcp.tool
+def create_skill(
+    name: str,
+    description: str,
+    body: str = "",
+    license: str | None = None,
+    allowed_tools: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    function_purpose: Create a new skill directory containing a SKILL.md per Agent Skills Spec.
+
+    Description:
+    - Creates a new directory under the skills root whose name matches the skill 'name' frontmatter.
+    - Writes a SKILL.md file with YAML frontmatter (name, description, optional license, allowed_tools, metadata)
+      followed by the markdown body.
+    - Fails if a skill with that name already exists or if the name is invalid.
+
+    Constraints:
+    - Additive only; will not overwrite existing skills.
+    - Name must be hyphen-case or simple alphanumeric with dashes/underscores.
+    - Body may be empty; if empty a placeholder is inserted.
+
+    Args:
+    - name: str                 Skill directory and frontmatter name (hyphen-case recommended)
+    - description: str          Concise description of the skill
+    - body: str                 Markdown guidance content (optional)
+    - license: str | None       Optional license identifier/text
+    - allowed_tools: list[str]  Optional list of tool names this skill permits
+    - metadata: dict[str, Any]  Optional arbitrary metadata mapping
+
+    Returns:
+    - dict[str, Any] with:
+      - created: bool
+      - path: str (relative path to SKILL.md within skills dir)
+      - message: str status narrative
+    """
+    # Basic validation of name
+    if not name or any(ch for ch in name if not (ch.isalnum() or ch in "-_")):
+        return {
+            "created": False,
+            "path": "",
+            "message": "Invalid skill name characters",
+        }
+    if name.startswith("-") or name.endswith("-"):
+        return {
+            "created": False,
+            "path": "",
+            "message": "Skill name cannot start/end with dash",
+        }
+
+    skills_dir = _resolve_skills_dir()
+    sdir = skills_dir / name
+    if sdir.exists():
+        return {"created": False, "path": "", "message": "Skill already exists"}
+
+    try:
+        sdir.mkdir(parents=True, exist_ok=False)
+    except Exception as exc:
+        return {
+            "created": False,
+            "path": "",
+            "message": f"Failed to create directory: {exc}",
+        }
+
+    # Prepare frontmatter lines
+    fm_lines = ["---", f'name: "{name}"', f'description: "{description}"']
+    if license:
+        fm_lines.append(f'license: "{license}"')
+    if allowed_tools:
+        # Simple YAML list
+        fm_lines.append("allowed_tools:")
+        for t in allowed_tools:
+            fm_lines.append(f"  - {t}")
+    if metadata:
+        fm_lines.append("metadata:")
+        for k, v in metadata.items():
+            fm_lines.append(
+                f"  {k}: {v!r}".replace("\\'", "'")
+            )  # crude repr -> YAML-ish
+    fm_lines.append("---")
+    fm = "\n".join(fm_lines)
+
+    content_body = body.strip()
+    if not content_body:
+        content_body = f"# {name}\n\n{description}\n\n(Placeholder body – update with detailed guidance.)"
+    skill_md = fm + "\n\n" + content_body.rstrip() + "\n"
+
+    skill_path = sdir / "SKILL.md"
+    try:
+        with open(skill_path, "x", encoding="utf-8") as f:
+            f.write(skill_md)
+    except Exception as exc:
+        return {
+            "created": False,
+            "path": "",
+            "message": f"Failed to write SKILL.md: {exc}",
+        }
+
+    rel = skill_path.relative_to(skills_dir).as_posix()
+    return {"created": True, "path": rel, "message": "Skill created"}
 
 
 @mcp.tool
