@@ -517,15 +517,15 @@ mcp = FastMCP(
         "  uses MIME type and UTF-8 decodability; returns either text or base64 content.\n"
         "\n"
         "Exposed tools:\n"
-        "- server_info(): server name, description, skills_dir, transport\n"
-        "- list_skills(): brief skill metadata (name, description, license?, allowed_tools?, metadata?, path)\n"
-        "- get_skill_detail(name): full parsed frontmatter + markdown body for a skill\n"
-        "- search_skill_index(query): substring search across name/description/body, returns brief matches\n"
-        "- list_skill_assets_tool(name): non-SKILL.md files inside a skill (path, size, mime_type)\n"
-        "- read_skill_asset_tool(name, path, max_bytes): read an asset within a skill (text/base64 + mime_type + truncated)\n"
-        "- create_skill(name, description, body?, license?, allowed_tools?, metadata?): create a new skill directory with SKILL.md\n"
-        "- add_skill_asset(name, path, content, encoding?, overwrite?): add a single asset file (text or base64) inside a skill\n"
-        "- add_skill_assets(name, assets, overwrite?): bulk add multiple asset files to a skill\n"
+        "- skill_server_info(): server name, description, skills_dir, transport\n"
+        "- skill_list_all(): brief skill metadata (name, description, license?, allowed_tools?, metadata?, path)\n"
+        "- skill_get_detail(name): full parsed frontmatter + markdown body for a skill\n"
+        "- skill_search_index(query): substring search across name/description/body, returns brief matches\n"
+        "- skill_list_assets(name): non-SKILL.md files inside a skill (path, size, mime_type)\n"
+        "- skill_read_asset(name, path, max_bytes): read an asset within a skill (text/base64 + mime_type + truncated)\n"
+        "- skill_create(name, description, body?, license?, allowed_tools?, metadata?): create a new skill directory with SKILL.md\n"
+        "- skill_add_asset(name, path, content, encoding?, overwrite?): add a single asset file (text or base64) inside a skill\n"
+        "- skill_add_assets(name, assets, overwrite?): bulk add multiple asset files to a skill\n"
         "\n"
         "Notes:\n"
         "- Skills must adhere to Agent Skills Spec (SKILL.md with YAML frontmatter: name, description).\n"
@@ -536,7 +536,7 @@ mcp = FastMCP(
 
 
 @mcp.tool
-def server_info() -> dict[str, Any]:
+def skill_server_info() -> dict[str, Any]:
     """
     function_purpose: Return server-level documentation including purpose and usage.
 
@@ -563,7 +563,7 @@ def server_info() -> dict[str, Any]:
 
 
 @mcp.tool
-def list_skills() -> list[dict[str, Any]]:
+def skill_list_all() -> list[dict[str, Any]]:
     """
     function_purpose: List available skills with brief metadata (excluding body).
 
@@ -597,7 +597,7 @@ def list_skills() -> list[dict[str, Any]]:
 
 
 @mcp.tool
-def get_skill_detail(name: str) -> dict[str, Any]:
+def skill_get_detail(name: str) -> dict[str, Any]:
     """
     function_purpose: Get full parsed details for a specific skill by name (frontmatter + body).
 
@@ -619,7 +619,7 @@ def get_skill_detail(name: str) -> dict[str, Any]:
 
 
 @mcp.tool
-def search_skill_index(query: str) -> list[dict[str, Any]]:
+def skill_search_index(query: str) -> list[dict[str, Any]]:
     """
     function_purpose: Search skills by case-insensitive substring across name, description, and body.
 
@@ -643,7 +643,7 @@ def search_skill_index(query: str) -> list[dict[str, Any]]:
 
 
 @mcp.tool
-def list_skill_assets_tool(name: str) -> list[dict[str, Any]]:
+def skill_list_assets(name: str) -> list[dict[str, Any]]:
     """
     function_purpose: List non-SKILL.md files within a skill folder (recursive).
 
@@ -662,14 +662,14 @@ def list_skill_assets_tool(name: str) -> list[dict[str, Any]]:
 
     Usage:
     - Call before reading assets to present available files to the agent or user.
-    - For reading actual content, use read_skill_asset_tool() with the returned path.
+    - For reading actual content, use skill_read_asset() with the returned path.
     """
     skills_dir = _resolve_skills_dir()
     return list_skill_assets(skills_dir, name)
 
 
 @mcp.tool
-def read_skill_asset_tool(
+def skill_read_asset(
     name: str, path: str, max_bytes: int = 8_388_608
 ) -> dict[str, Any]:
     """
@@ -700,7 +700,7 @@ def read_skill_asset_tool(
 
 
 @mcp.tool
-def create_skill(
+def skill_create(
     name: str,
     description: str,
     body: str = "",
@@ -803,7 +803,7 @@ def create_skill(
 
 
 @mcp.tool
-def add_skill_asset(
+def skill_add_asset(
     name: str,
     path: str,
     content: str,
@@ -907,7 +907,7 @@ def add_skill_asset(
 
 
 @mcp.tool
-def add_skill_assets(
+def skill_add_assets(
     name: str,
     assets: list[dict[str, Any]],
     overwrite: bool = False,
@@ -943,12 +943,12 @@ def add_skill_assets(
                 }
             )
             continue
-        results.append(add_skill_asset(name, p, c, enc, overwrite))
+        results.append(skill_add_asset(name, p, c, enc, overwrite))
     return results
 
 
 @mcp.tool
-def store_skill_note(name: str, title: str, content: str) -> dict[str, Any]:
+def skill_store_note(name: str, title: str, content: str) -> dict[str, Any]:
     """
     function_purpose: Append a new note to a skill capturing learnings, improvements, and scripts.
 
@@ -1027,7 +1027,7 @@ def store_skill_note(name: str, title: str, content: str) -> dict[str, Any]:
 
 
 @mcp.tool
-def list_skill_notes(name: str) -> list[dict[str, Any]]:
+def skill_list_notes(name: str) -> list[dict[str, Any]]:
     """
     function_purpose: List notes created under a skill’s _notes directory.
 
@@ -1048,7 +1048,7 @@ def list_skill_notes(name: str) -> list[dict[str, Any]]:
       - kind: str | None      "note" when created by store_skill_note()
 
     Usage:
-    - Use this to browse available notes and select one to read with read_skill_asset_tool().
+    - Use this to browse available notes and select one to read with skill_read_asset().
     """
     skills_dir = _resolve_skills_dir()
     sdir = skill_dir_for_name(skills_dir, name)
