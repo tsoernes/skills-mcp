@@ -57,6 +57,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SKILLS_DIR = REPO_ROOT / "skills"
 DEFAULT_LOG_DIR = REPO_ROOT / "logs"
 DEFAULT_LOG_FILE = DEFAULT_LOG_DIR / "skills_mcp_server.log"
+DEFAULT_TRASH_DIR = REPO_ROOT / "trash"
+DEFAULT_OPS_LOG_DIR = REPO_ROOT / "logs"
+DEFAULT_OPS_LOG_FILE = DEFAULT_OPS_LOG_DIR / "skills_mcp_operations.log"
 SERVER_NAME = "ClaudeSkills"
 
 
@@ -95,6 +98,80 @@ def configure_logging() -> logging.Logger:
 
     logger.info("Logging initialized. File: %s", str(log_file))
     return logger
+
+
+def _resolve_trash_dir() -> Path:
+    """
+    function_purpose: Resolve the trash directory where deleted skills/assets are moved.
+
+    Uses DEFAULT_TRASH_DIR by default; can be overridden via TRASH_DIR env var.
+    Ensures the directory exists.
+    """
+    trash_env = os.environ.get("TRASH_DIR")
+    trash_dir = Path(trash_env).resolve() if trash_env else DEFAULT_TRASH_DIR
+    trash_dir.mkdir(parents=True, exist_ok=True)
+    return trash_dir
+
+
+def _log_operation(op: str, payload: dict[str, Any]) -> None:
+    """
+    function_purpose: Append a single JSON line describing a destructive operation.
+
+    This is used for trashing skills and assets so that actions are auditable.
+    """
+    import json
+    from datetime import datetime
+
+    ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    record = {"ts": ts, "op": op}
+    record.update(payload)
+
+    try:
+        DEFAULT_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        with open(DEFAULT_OPS_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception:
+        # Logging must not break the main operation; swallow errors.
+        logging.getLogger(SERVER_NAME).warning(
+            "Failed to write operation log entry", exc_info=True
+        )
+
+
+def _resolve_trash_dir() -> Path:
+    """
+    function_purpose: Resolve the trash directory where deleted skills/assets are moved.
+
+    Uses DEFAULT_TRASH_DIR by default; can be overridden via TRASH_DIR env var.
+    Ensures the directory exists.
+    """
+    trash_env = os.environ.get("TRASH_DIR")
+    trash_dir = Path(trash_env).resolve() if trash_env else DEFAULT_TRASH_DIR
+    trash_dir.mkdir(parents=True, exist_ok=True)
+    return trash_dir
+
+
+def _log_operation(op: str, payload: dict[str, Any]) -> None:
+    """
+    function_purpose: Append a single JSON line describing a destructive operation.
+
+    This is used for trashing skills and assets so that actions are auditable.
+    """
+    import json
+    from datetime import datetime
+
+    ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    record = {"ts": ts, "op": op}
+    record.update(payload)
+
+    try:
+        DEFAULT_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        with open(DEFAULT_OPS_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception:
+        # Logging must not break the main operation; swallow errors.
+        logging.getLogger(SERVER_NAME).warning(
+            "Failed to write operation log entry", exc_info=True
+        )
 
 
 # --- Git sync (background) ---
@@ -306,12 +383,45 @@ def discover_skills(
     return skills
 
 
-def get_skill(skills_dir: Path, name: str) -> dict[str, Any]:
+def get_skill(
+    skills_dir: Path, name: str, include_notes: bool = True
+) -> dict[str, Any]:
     """
     function_purpose: Retrieve full skill details by its name (hyphen-case).
+
+    Args:
+    - name: str             Skill name
+    - include_notes: bool   If True (default), append notes from _notes/ to body
+
+    Returns dict with skill details. If include_notes=True, the body field will have
+    notes appended in markdown format for complete context.
     """
     for skill in discover_skills(skills_dir):
         if skill.get("name") == name:
+            if include_notes:
+                # Append notes to the body
+                skill_root = skill_dir_for_name(skills_dir, name)
+                notes_dir = skill_root / "_notes"
+                if notes_dir.exists() and notes_dir.is_dir():
+                    note_files = sorted(
+                        [f for f in notes_dir.rglob("*") if f.is_file()]
+                    )
+                    if note_files:
+                        notes_section = ["\n\n---\n\n# Notes\n"]
+                        notes_section.append(
+                            "\nThe following notes contain learnings, corrections, improvements, and examples discovered while using this skill:\n"
+                        )
+                        for note_file in note_files:
+                            try:
+                                note_content = note_file.read_text(encoding="utf-8")
+                                rel_path = note_file.relative_to(skill_root).as_posix()
+                                notes_section.append(
+                                    f"\n## Note: {rel_path}\n\n{note_content}\n"
+                                )
+                            except Exception:
+                                # Skip notes that can't be read
+                                pass
+                        skill["body"] = skill.get("body", "") + "".join(notes_section)
             return skill
     raise ValueError(f"skill '{name}' not found")
 
@@ -360,6 +470,23 @@ def skill_dir_for_name(skills_dir: Path, name: str) -> Path:
             # Skip invalid while resolving
             continue
     raise ValueError(f"skill '{name}' not found")
+
+
+def _is_anthropic_skill(skills_dir: Path, name: str) -> bool:
+    """
+    function_purpose: Determine if a skill is part of the Anthropic/bundled skills set.
+
+    A skill is considered Anthropic/bundled if its SKILL.md lives under the primary skills_dir.
+    """
+    try:
+        sdir = skill_dir_for_name(skills_dir, name)
+    except Exception:
+        return False
+    # Anthropic/bundled skills live directly under skills_dir; user skills may live elsewhere.
+    try:
+        return skills_dir.resolve() in sdir.resolve().parents
+    except Exception:
+        return False
 
 
 def list_skill_assets(skills_dir: Path, name: str) -> list[dict[str, Any]]:
@@ -519,7 +646,7 @@ mcp = FastMCP(
         "Exposed tools:\n"
         "- skill_server_info(): server name, description, skills_dir, transport\n"
         "- skill_list_all(): brief skill metadata (name, description, license?, allowed_tools?, metadata?, path)\n"
-        "- skill_get_detail(name): full parsed frontmatter + markdown body for a skill\n"
+        "- skill_get_detail(name, include_notes?): full parsed frontmatter + markdown body for a skill (includes notes by default)\n"
         "- skill_search_index(query): substring search across name/description/body, returns brief matches\n"
         "- skill_list_assets(name): non-SKILL.md files inside a skill (path, size, mime_type)\n"
         "- skill_read_asset(name, path, max_bytes): read an asset within a skill (text/base64 + mime_type + truncated)\n"
@@ -531,6 +658,16 @@ mcp = FastMCP(
         "- Skills must adhere to Agent Skills Spec (SKILL.md with YAML frontmatter: name, description).\n"
         "- Immediate directory name must match 'name' in frontmatter (e.g., document-skills/docx with name: docx).\n"
         "- Invalid SKILL.md entries are surfaced with error diagnostics in metadata but do not stop discovery.\n"
+        "\n"
+        "Notes and Assets:\n"
+        "- skill_get_detail() includes notes by default; notes contain corrections, improvements, and asset documentation.\n"
+        "- Notes are appended to the skill body to provide complete context including learnings and examples.\n"
+        "- IMPORTANT: When adding assets via skill_add_asset/skill_add_assets, ALWAYS create a note documenting:\n"
+        "  * What the asset contains and its purpose\n"
+        "  * When and why an agent should load/use it\n"
+        "  * Any context or prerequisites needed to understand it\n"
+        "  * Example usage patterns if applicable\n"
+        "- This documentation practice ensures assets remain discoverable and usable over time.\n"
     ),
 )
 
@@ -597,25 +734,30 @@ def skill_list_all() -> list[dict[str, Any]]:
 
 
 @mcp.tool
-def skill_get_detail(name: str) -> dict[str, Any]:
+def skill_get_detail(name: str, include_notes: bool = True) -> dict[str, Any]:
     """
-    function_purpose: Get full parsed details for a specific skill by name (frontmatter + body).
+    function_purpose: Get full parsed details for a specific skill by name (frontmatter + body + notes).
 
     Description:
     - Returns the complete parsed skill including frontmatter fields and the markdown body content.
+    - By default, appends all notes from the _notes/ directory to provide complete context including
+      learnings, improvements, corrections, and examples discovered while using the skill.
 
     Args:
-    - name: str  The hyphen-case name of the skill (must match the skill directory name)
+    - name: str             The hyphen-case name of the skill (must match the skill directory name)
+    - include_notes: bool   If True (default), append notes from _notes/ to the body for complete context
 
     Returns:
     - dict containing:
-      - name, description, license?, allowed_tools?, metadata?, path, body (markdown)
+      - name, description, license?, allowed_tools?, metadata?, path, body (markdown, with notes appended if include_notes=True)
 
     Usage:
     - Use this when the agent needs the full guidance text and metadata for a skill.
+    - Notes are included by default to ensure the agent sees all relevant context, corrections, and examples.
+    - Set include_notes=False only if you want just the core SKILL.md content without historical notes.
     """
     skills_dir = _resolve_skills_dir()
-    return get_skill(skills_dir, name)
+    return get_skill(skills_dir, name, include_notes=include_notes)
 
 
 @mcp.tool
@@ -818,6 +960,14 @@ def skill_add_asset(
     - Supports text (UTF-8) or base64 content for binary assets (e.g. PDFs, images).
     - Will not overwrite existing files unless overwrite=True.
 
+    IMPORTANT: After adding an asset, you should ALWAYS create a note (via skill_store_note) documenting:
+    - What the asset contains and its purpose
+    - When and why an agent should load/use it
+    - Any context needed to understand it
+    - Example usage patterns if applicable
+
+    This ensures the asset remains discoverable and properly documented for future use.
+
     Args:
     - name: str          Skill name (directory must already exist)
     - path: str          Relative path inside the skill (e.g. "examples/foo.py")
@@ -918,6 +1068,12 @@ def skill_add_assets(
     Description:
     - Convenience wrapper over add_skill_asset for efficiency when scaffolding several files.
     - Applies a shared overwrite policy (individual entries may still be rejected if invalid).
+
+    IMPORTANT: After adding assets, you should ALWAYS create a note (via skill_store_note) documenting:
+    - What each asset contains and its purpose
+    - When and why an agent should load/use them
+    - Any context needed to understand them
+    - Example usage patterns if applicable
 
     Args:
     - name: str                   Skill name
@@ -1106,6 +1262,287 @@ def skill_list_notes(name: str) -> list[dict[str, Any]]:
     # Stable ordering by path
     results.sort(key=lambda x: x.get("path") or "")
     return results
+
+
+@mcp.tool
+def skill_trash_user_skill(name: str, force: bool = True) -> dict[str, Any]:
+    """
+    function_purpose: Move a user-created skill directory into a trash location instead of hard deleting it.
+
+    Policy:
+    - Only user-created skills may be trashed. Bundled/Anthropic skills are rejected.
+    - The skill directory is moved under a trash/skills subdirectory with a timestamped folder name.
+    - All operations are logged to an operations log file.
+
+    Args:
+    - name: str   Skill name to trash
+    - force: bool Require explicit confirmation flag (default True). If False, the call is a dry refusal.
+
+    Returns:
+    - dict[str, Any] with:
+      - trashed: bool
+      - name: str
+      - trash_path: str | None
+      - message: str
+    """
+    from datetime import datetime
+    import shutil
+
+    skills_dir = _resolve_skills_dir()
+    trash_dir = _resolve_trash_dir()
+
+    # Anthropic/bundled skills live under the primary skills_dir and must not be trashed.
+    try:
+        sdir = skill_dir_for_name(skills_dir, name)
+    except Exception:
+        return {
+            "trashed": False,
+            "name": name,
+            "trash_path": None,
+            "message": "Skill not found",
+        }
+
+    # If this is an Anthropic/bundled skill, refuse. User-created skills should be placed in a separate
+    # directory tree by configuration if stronger separation is needed.
+    if _is_anthropic_skill(skills_dir, name):
+        _log_operation(
+            "skill_trash_user_skill_denied",
+            {"skill": name, "reason": "anthropic_skill"},
+        )
+        return {
+            "trashed": False,
+            "name": name,
+            "trash_path": None,
+            "message": "Trashing bundled/Anthropic skills is not allowed",
+        }
+
+    if not force:
+        return {
+            "trashed": False,
+            "name": name,
+            "trash_path": None,
+            "message": "Set force=True to move skill to trash",
+        }
+
+    ts = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    trash_root = trash_dir / "skills"
+    trash_root.mkdir(parents=True, exist_ok=True)
+    trash_target = trash_root / f"{ts}__{name}"
+
+    try:
+        shutil.move(str(sdir), str(trash_target))
+    except Exception as exc:
+        _log_operation(
+            "skill_trash_user_skill_error",
+            {"skill": name, "error": str(exc)},
+        )
+        return {
+            "trashed": False,
+            "name": name,
+            "trash_path": None,
+            "message": f"Failed to move skill to trash: {exc}",
+        }
+
+    rel_trash = trash_target.as_posix()
+    _log_operation(
+        "skill_trash_user_skill",
+        {"skill": name, "trash_path": rel_trash},
+    )
+    return {
+        "trashed": True,
+        "name": name,
+        "trash_path": rel_trash,
+        "message": "Skill moved to trash",
+    }
+
+
+@mcp.tool
+def skill_trash_user_asset(name: str, path: str) -> dict[str, Any]:
+    """
+    function_purpose: Move a user-created asset or note into trash instead of deleting it.
+
+    Policy:
+    - For bundled/Anthropic skills:
+      * Only assets under reserved user areas are allowed:
+        - "_user_assets/" subtree
+        - "_user_notes/" subtree
+        - "_notes/" subtree (legacy, for backward compatibility)
+      * Core assets (including SKILL.md and any other non-user files) cannot be trashed.
+    - For user-created skills:
+      * Any asset path under the skill directory may be trashed.
+    - The target file is moved under trash/assets/<skill_name>/<timestamp>__<relative_path>.
+    - Operations are logged in an operations log.
+
+    Args:
+    - name: str   Skill name
+    - path: str   Relative path within the skill directory
+
+    Returns:
+    - dict[str, Any] with:
+      - trashed: bool
+      - name: str
+      - path: str
+      - trash_path: str | None
+      - message: str
+    """
+    from datetime import datetime
+
+    skills_dir = _resolve_skills_dir()
+    trash_dir = _resolve_trash_dir()
+
+    try:
+        skill_root = skill_dir_for_name(skills_dir, name)
+    except Exception:
+        return {
+            "trashed": False,
+            "name": name,
+            "path": path,
+            "trash_path": None,
+            "message": "Skill not found",
+        }
+
+    if not path or path.startswith("/"):
+        return {
+            "trashed": False,
+            "name": name,
+            "path": path,
+            "trash_path": None,
+            "message": "Invalid asset path",
+        }
+
+    target = (skill_root / path).resolve()
+    try:
+        if (
+            skill_root.resolve() not in target.parents
+            and target != skill_root.resolve()
+        ):
+            return {
+                "trashed": False,
+                "name": name,
+                "path": path,
+                "trash_path": None,
+                "message": "Path traversal detected",
+            }
+    except Exception:
+        return {
+            "trashed": False,
+            "name": name,
+            "path": path,
+            "trash_path": None,
+            "message": "Path resolution failed",
+        }
+
+    if not target.exists() or not target.is_file():
+        return {
+            "trashed": False,
+            "name": name,
+            "path": path,
+            "trash_path": None,
+            "message": "Asset does not exist",
+        }
+
+    # Enforce Anthropic vs user-skill policy.
+    is_anthropic = _is_anthropic_skill(skills_dir, name)
+    rel_from_root = target.relative_to(skill_root).as_posix()
+
+    if is_anthropic:
+        # Only user-reserved subtrees allowed for Anthropic skills.
+        # Accept both _notes/ (legacy) and _user_notes/ (new convention)
+        if not (
+            rel_from_root.startswith("_user_assets/")
+            or rel_from_root.startswith("_user_notes/")
+            or rel_from_root.startswith("_notes/")
+        ):
+            _log_operation(
+                "skill_trash_user_asset_denied",
+                {
+                    "skill": name,
+                    "path": rel_from_root,
+                    "reason": "anthropic_core_asset",
+                },
+            )
+            return {
+                "trashed": False,
+                "name": name,
+                "path": path,
+                "trash_path": None,
+                "message": "Only user-created assets/notes under _user_assets/, _user_notes/, or _notes/ may be trashed for Anthropic skills",
+            }
+        if rel_from_root == "SKILL.md":
+            _log_operation(
+                "skill_trash_user_asset_denied",
+                {
+                    "skill": name,
+                    "path": rel_from_root,
+                    "reason": "anthropic_skill_md",
+                },
+            )
+            return {
+                "trashed": False,
+                "name": name,
+                "path": path,
+                "trash_path": None,
+                "message": "Cannot trash SKILL.md for Anthropic skills",
+            }
+
+    # Compute trash target path.
+    ts = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    trash_root = trash_dir / "assets" / name
+    trash_root.mkdir(parents=True, exist_ok=True)
+    safe_rel = rel_from_root.replace("/", "__")
+    trash_target = trash_root / f"{ts}__{safe_rel}"
+
+    try:
+        import shutil
+
+        shutil.move(str(target), str(trash_target))
+    except Exception as exc:
+        _log_operation(
+            "skill_trash_user_asset_error",
+            {
+                "skill": name,
+                "path": rel_from_root,
+                "error": str(exc),
+            },
+        )
+        return {
+            "trashed": False,
+            "name": name,
+            "path": path,
+            "trash_path": None,
+            "message": f"Failed to move asset to trash: {exc}",
+        }
+
+    # Best-effort cleanup of empty parent directories under the skill root.
+    parent = target.parent
+    try:
+        skill_root_resolved = skill_root.resolve()
+        while parent != skill_root_resolved and parent.exists():
+            try:
+                parent.rmdir()
+            except OSError:
+                break
+            parent = parent.parent
+    except Exception:
+        # Do not fail the operation due to cleanup errors.
+        pass
+
+    rel_trash = trash_target.as_posix()
+    _log_operation(
+        "skill_trash_user_asset",
+        {
+            "skill": name,
+            "path": rel_from_root,
+            "trash_path": rel_trash,
+        },
+    )
+    return {
+        "trashed": True,
+        "name": name,
+        "path": path,
+        "trash_path": rel_trash,
+        "message": "Asset moved to trash",
+    }
 
 
 # --- Entry points ---
