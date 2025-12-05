@@ -21,7 +21,14 @@ Environment (optional):
 - SKILLS_GIT_URL: git URL (e.g., https://github.com/yourorg/skills-repo.git)
 - SKILLS_GIT_BRANCH: branch to pull/clone (default: main)
 - SKILLS_DIR: override path to the skills directory (default: <repo_root>/skills)
+- USER_SKILLS_DIR: override path to user-skills overlay directory (default: <repo_root>/user-skills)
 - LOG_FILE: override log file path (default: <repo_root>/logs/skills_mcp_server.log)
+
+User Skills Directory:
+- User-created notes and assets can be placed in <repo_root>/user-skills/<skill-name>/notes/
+- These overlay onto Anthropic skills and are included when fetching skill details
+- Allows tracking user content in git while keeping Anthropic skills separate
+- Example: user-skills/mcp-builder/notes/my-note.md will be included with mcp-builder skill
 
 Usage:
 - As a script:
@@ -55,6 +62,7 @@ from fastmcp import FastMCP
 # --- Paths & constants ---
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SKILLS_DIR = REPO_ROOT / "skills"
+DEFAULT_USER_SKILLS_DIR = REPO_ROOT / "user-skills"
 DEFAULT_LOG_DIR = REPO_ROOT / "logs"
 DEFAULT_LOG_FILE = DEFAULT_LOG_DIR / "skills_mcp_server.log"
 DEFAULT_TRASH_DIR = REPO_ROOT / "trash"
@@ -399,17 +407,30 @@ def get_skill(
     for skill in discover_skills(skills_dir):
         if skill.get("name") == name:
             if include_notes:
-                # Append notes to the body from both _notes/ and notes/ directories
+                # Append notes to the body from multiple sources:
+                # 1. Skill's own _notes/ and notes/ directories
+                # 2. User overlay from user-skills/<skill-name>/notes/
                 skill_root = skill_dir_for_name(skills_dir, name)
+                user_skills_dir = _resolve_user_skills_dir()
                 note_files = []
 
-                # Check both _notes/ (programmatic) and notes/ (manual) directories
+                # Check skill's own notes directories
                 for notes_dirname in ["_notes", "notes"]:
                     notes_dir = skill_root / notes_dirname
                     if notes_dir.exists() and notes_dir.is_dir():
                         note_files.extend(
                             [f for f in notes_dir.rglob("*") if f.is_file()]
                         )
+
+                # Check user-skills overlay directory
+                user_skill_dir = user_skills_dir / name
+                if user_skill_dir.exists():
+                    for notes_dirname in ["_notes", "notes"]:
+                        user_notes_dir = user_skill_dir / notes_dirname
+                        if user_notes_dir.exists() and user_notes_dir.is_dir():
+                            note_files.extend(
+                                [f for f in user_notes_dir.rglob("*") if f.is_file()]
+                            )
 
                 if note_files:
                     # Sort all notes together
@@ -421,7 +442,19 @@ def get_skill(
                     for note_file in note_files:
                         try:
                             note_content = note_file.read_text(encoding="utf-8")
-                            rel_path = note_file.relative_to(skill_root).as_posix()
+                            # Try to get relative path from skill root first, then user-skills root
+                            try:
+                                rel_path = note_file.relative_to(skill_root).as_posix()
+                            except ValueError:
+                                try:
+                                    rel_path = (
+                                        f"user-skills/{name}/"
+                                        + note_file.relative_to(
+                                            user_skill_dir
+                                        ).as_posix()
+                                    )
+                                except ValueError:
+                                    rel_path = note_file.name
                             notes_section.append(
                                 f"\n## Note: {rel_path}\n\n{note_content}\n"
                             )
@@ -602,6 +635,16 @@ def _resolve_skills_dir() -> Path:
     """
     env_dir = os.environ.get("SKILLS_DIR")
     return Path(env_dir).resolve() if env_dir else DEFAULT_SKILLS_DIR
+
+
+def _resolve_user_skills_dir() -> Path:
+    """
+    function_purpose: Resolve user-skills directory from environment or default location.
+
+    This directory contains user-created notes and assets that overlay Anthropic skills.
+    """
+    env_dir = os.environ.get("USER_SKILLS_DIR")
+    return Path(env_dir).resolve() if env_dir else DEFAULT_USER_SKILLS_DIR
 
 
 def _server_description() -> str:
@@ -1307,11 +1350,14 @@ def skill_list_notes(
     - Set markdown_output=True for a more readable format.
     """
     skills_dir = _resolve_skills_dir()
+    user_skills_dir = _resolve_user_skills_dir()
     sdir = skill_dir_for_name(skills_dir, name)
     results: list[dict[str, Any]] = []
 
-    # Check both _notes/ and notes/ directories
+    # Check both skill's own notes and user-skills overlay
     found_any = False
+
+    # Check skill's own _notes/ and notes/ directories
     for notes_dirname in ["_notes", "notes"]:
         notes_dir = sdir / notes_dirname
         if not notes_dir.exists():
@@ -1363,6 +1409,67 @@ def skill_list_notes(
                     "kind": kind,
                 }
             )
+
+    # Check user-skills overlay directory
+    user_skill_dir = user_skills_dir / name
+    if user_skill_dir.exists():
+        for notes_dirname in ["_notes", "notes"]:
+            user_notes_dir = user_skill_dir / notes_dirname
+            if not user_notes_dir.exists():
+                continue
+            found_any = True
+
+            for f in user_notes_dir.rglob("*"):
+                if not f.is_file():
+                    continue
+                try:
+                    rel_path = (
+                        f"user-skills/{name}/"
+                        + f.relative_to(user_skill_dir).as_posix()
+                    )
+                except ValueError:
+                    rel_path = f.name
+                try:
+                    size = f.stat().st_size
+                except OSError:
+                    size = None
+
+                title: str | None = None
+                created_at: str | None = None
+                kind: str | None = None
+
+                # Best-effort parse of YAML frontmatter if present
+                try:
+                    txt = f.read_text(encoding="utf-8")
+                    lines = txt.splitlines(keepends=False)
+                    if lines and lines[0].strip() == "---":
+                        fm_lines: list[str] = []
+                        idx = 1
+                        while idx < len(lines) and lines[idx].strip() != "---":
+                            fm_lines.append(lines[idx])
+                            idx += 1
+                        if idx < len(lines) and lines[idx].strip() == "---":
+                            fm = yaml.safe_load("\n".join(fm_lines)) or {}
+                            if isinstance(fm, dict):
+                                t = fm.get("title")
+                                ca = fm.get("created_at")
+                                k = fm.get("kind")
+                                title = t if isinstance(t, str) else None
+                                created_at = ca if isinstance(ca, str) else None
+                                kind = k if isinstance(k, str) else None
+                except Exception:
+                    # Ignore parsing errors; still include the file in results
+                    pass
+
+                results.append(
+                    {
+                        "path": rel_path,
+                        "size": size,
+                        "title": title,
+                        "created_at": created_at,
+                        "kind": kind,
+                    }
+                )
 
     if not found_any:
         if markdown_output:
