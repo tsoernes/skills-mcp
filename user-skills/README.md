@@ -18,11 +18,9 @@ user-skills/
     │   └── *.md
     ├── _notes/          # Programmatic notes (via skill_store_note tool)
     │   └── *.md
-    ├── examples/        # Code examples and reference implementations
+    ├── examples/        # User code examples and reference implementations
     │   └── *.py, *.ts, etc.
-    ├── scripts/         # Helper scripts and utilities
-    │   └── *.py, *.sh, etc.
-    └── assets/          # Any other supporting files
+    └── assets/          # Any other user supporting files
         └── *.*
 ```
 
@@ -123,13 +121,9 @@ user-skills/
 │   ├── notes/
 │   │   ├── health-check.md
 │   │   └── smart-async.md
-│   ├── examples/
-│   │   ├── health_check_human_readable.py
-│   │   └── smart_async_shielded_task.py
-│   └── scripts/
-│       ├── connections.py
-│       ├── evaluation.py
-│       └── requirements.txt
+│   └── examples/
+│       ├── health_check_human_readable.py
+│       └── smart_async_shielded_task.py
 ├── frontend-design/
 │   ├── notes/
 │   │   └── my-component-patterns.md
