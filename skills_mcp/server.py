@@ -531,12 +531,16 @@ def _is_anthropic_skill(skills_dir: Path, name: str) -> bool:
 
 def list_skill_assets(skills_dir: Path, name: str) -> list[dict[str, Any]]:
     """
-    function_purpose: Enumerate non-SKILL.md files within a skill directory.
+    function_purpose: Enumerate non-SKILL.md files within a skill directory and user-skills overlay.
 
     Returns dicts: {path, size, mime_type} with path relative to the skill folder.
+    Includes assets from both the skill's directory and user-skills overlay.
     """
     sdir = skill_dir_for_name(skills_dir, name)
+    user_skills_dir = _resolve_user_skills_dir()
     assets: list[dict[str, Any]] = []
+
+    # Get assets from skill's own directory
     for f in [p for p in sdir.rglob("*") if p.is_file()]:
         if f.name == "SKILL.md":
             continue
@@ -547,6 +551,22 @@ def list_skill_assets(skills_dir: Path, name: str) -> list[dict[str, Any]]:
             size = None
         mime, _ = guess_type(f.name)
         assets.append({"path": rel, "size": size, "mime_type": mime})
+
+    # Get assets from user-skills overlay
+    user_skill_dir = user_skills_dir / name
+    if user_skill_dir.exists() and user_skill_dir.is_dir():
+        for f in [p for p in user_skill_dir.rglob("*") if p.is_file()]:
+            try:
+                rel = f"user-skills/{name}/" + f.relative_to(user_skill_dir).as_posix()
+            except ValueError:
+                rel = f.name
+            try:
+                size = f.stat().st_size
+            except OSError:
+                size = None
+            mime, _ = guess_type(f.name)
+            assets.append({"path": rel, "size": size, "mime_type": mime})
+
     assets.sort(key=lambda x: x["path"])
     return assets
 
@@ -584,7 +604,7 @@ def read_skill_asset(
     max_bytes: int = 8_388_608,
 ) -> dict[str, Any]:
     """
-    function_purpose: Safely read a file within a skill directory, returning text or base64 data.
+    function_purpose: Safely read a file within a skill directory or user-skills overlay, returning text or base64 data.
 
     Returns: {
       "encoding": "text" | "base64",
@@ -593,12 +613,25 @@ def read_skill_asset(
       "truncated": bool
     }
     """
-    sdir = skill_dir_for_name(skills_dir, name)
-    file_path = (sdir / rel_path).resolve()
+    # Check if this is a user-skills path
+    if rel_path.startswith(f"user-skills/{name}/"):
+        user_skills_dir = _resolve_user_skills_dir()
+        user_skill_dir = user_skills_dir / name
+        # Remove the "user-skills/{name}/" prefix
+        user_rel_path = rel_path[len(f"user-skills/{name}/") :]
+        file_path = (user_skill_dir / user_rel_path).resolve()
 
-    # Prevent path traversal
-    if sdir not in file_path.parents and file_path != sdir:
-        raise ValueError("path must be within the skill directory")
+        # Prevent path traversal
+        if user_skill_dir not in file_path.parents and file_path != user_skill_dir:
+            raise ValueError("path must be within the user-skills directory")
+    else:
+        # Regular skill asset
+        sdir = skill_dir_for_name(skills_dir, name)
+        file_path = (sdir / rel_path).resolve()
+
+        # Prevent path traversal
+        if sdir not in file_path.parents and file_path != sdir:
+            raise ValueError("path must be within the skill directory")
 
     if not file_path.exists() or not file_path.is_file():
         raise ValueError(f"file not found: {rel_path}")

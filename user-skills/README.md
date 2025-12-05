@@ -1,6 +1,6 @@
 # User Skills Directory
 
-This directory contains user-created notes and assets that overlay onto Anthropic skills.
+This directory contains user-created notes, assets, examples, and scripts that overlay onto Anthropic skills.
 
 ## Purpose
 
@@ -16,18 +16,32 @@ user-skills/
 └── <skill-name>/
     ├── notes/           # User-created markdown notes
     │   └── *.md
-    └── _notes/          # Programmatic notes (via skill_store_note tool)
-        └── *.md
+    ├── _notes/          # Programmatic notes (via skill_store_note tool)
+    │   └── *.md
+    ├── examples/        # Code examples and reference implementations
+    │   └── *.py, *.ts, etc.
+    ├── scripts/         # Helper scripts and utilities
+    │   └── *.py, *.sh, etc.
+    └── assets/          # Any other supporting files
+        └── *.*
 ```
 
 ## How It Works
 
 When you fetch a skill (e.g., `mcp-builder`), the server automatically includes:
 
+### Notes
 1. **Skill's own notes** from `skills/skills/<skill-name>/_notes/` and `skills/skills/<skill-name>/notes/`
 2. **User overlay notes** from `user-skills/<skill-name>/_notes/` and `user-skills/<skill-name>/notes/`
 
 All notes are appended to the skill body under a "Notes" section, providing complete context.
+
+### Assets
+When listing or reading assets:
+1. **Skill's own assets** from `skills/skills/<skill-name>/`
+2. **User overlay assets** from `user-skills/<skill-name>/` (prefixed with `user-skills/<skill-name>/`)
+
+Both are returned together, allowing you to organize examples, scripts, and other files separately.
 
 ## Creating User Notes
 
@@ -92,6 +106,12 @@ skill_list_notes("mcp-builder", markdown_output=True)
 
 # Get skill with all notes included (default)
 skill_get_detail("mcp-builder", include_notes=True, markdown_output=True)
+
+# List all assets for a skill (includes both skill and user assets)
+skill_list_assets("mcp-builder", markdown_output=True)
+
+# Read a user asset
+skill_read_asset("mcp-builder", "user-skills/mcp-builder/examples/health_check_human_readable.py")
 ```
 
 ## Example Structure
@@ -100,12 +120,21 @@ skill_get_detail("mcp-builder", include_notes=True, markdown_output=True)
 user-skills/
 ├── README.md
 ├── mcp-builder/
-│   └── notes/
-│       ├── health-check.md
-│       └── smart-async.md
+│   ├── notes/
+│   │   ├── health-check.md
+│   │   └── smart-async.md
+│   ├── examples/
+│   │   ├── health_check_human_readable.py
+│   │   └── smart_async_shielded_task.py
+│   └── scripts/
+│       ├── connections.py
+│       ├── evaluation.py
+│       └── requirements.txt
 ├── frontend-design/
-│   └── notes/
-│       └── my-component-patterns.md
+│   ├── notes/
+│   │   └── my-component-patterns.md
+│   └── examples/
+│       └── responsive-card.tsx
 └── python-tools/
     ├── notes/
     │   └── debugging-tips.md
