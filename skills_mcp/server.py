@@ -645,14 +645,23 @@ mcp = FastMCP(
         "\n"
         "Exposed tools:\n"
         "- skill_server_info(): server name, description, skills_dir, transport\n"
-        "- skill_list_all(): brief skill metadata (name, description, license?, allowed_tools?, metadata?, path)\n"
-        "- skill_get_detail(name, include_notes?): full parsed frontmatter + markdown body for a skill (includes notes by default)\n"
-        "- skill_search_index(query): substring search across name/description/body, returns brief matches\n"
-        "- skill_list_assets(name): non-SKILL.md files inside a skill (path, size, mime_type)\n"
+        "- skill_list_all(markdown_output?): brief skill metadata (supports markdown output)\n"
+        "- skill_get_detail(name, include_notes?, markdown_output?): full skill with notes (supports markdown output)\n"
+        "- skill_search_index(query, markdown_output?): substring search across skills (supports markdown output)\n"
+        "- skill_list_assets(name, markdown_output?): non-SKILL.md files inside a skill (supports markdown output)\n"
+        "- skill_list_notes(name, markdown_output?): list notes for a skill (supports markdown output)\n"
         "- skill_read_asset(name, path, max_bytes): read an asset within a skill (text/base64 + mime_type + truncated)\n"
         "- skill_create(name, description, body?, license?, allowed_tools?, metadata?): create a new skill directory with SKILL.md\n"
         "- skill_add_asset(name, path, content, encoding?, overwrite?): add a single asset file (text or base64) inside a skill\n"
         "- skill_add_assets(name, assets, overwrite?): bulk add multiple asset files to a skill\n"
+        "- skill_store_note(name, title, content): append a note to a skill\n"
+        "- skill_trash_user_skill(name, force?): move user-created skill to trash\n"
+        "- skill_trash_user_asset(name, path): move user-created asset/note to trash\n"
+        "\n"
+        "Markdown Output:\n"
+        "- Many tools support optional 'markdown_output=True' parameter for readable formatted output.\n"
+        "- When enabled, returns formatted markdown string instead of JSON structure.\n"
+        "- Useful for better readability and token efficiency when presenting information to LLMs.\n"
         "\n"
         "Notes:\n"
         "- Skills must adhere to Agent Skills Spec (SKILL.md with YAML frontmatter: name, description).\n"
@@ -700,7 +709,7 @@ def skill_server_info() -> dict[str, Any]:
 
 
 @mcp.tool
-def skill_list_all() -> list[dict[str, Any]]:
+def skill_list_all(markdown_output: bool = False) -> list[dict[str, Any]] | str:
     """
     function_purpose: List available skills with brief metadata (excluding body).
 
@@ -708,21 +717,20 @@ def skill_list_all() -> list[dict[str, Any]]:
     - Enumerates all discovered skills from the skills directory and returns summary metadata.
     - Excludes the markdown body for compact listing; use get_skill_detail for full content.
 
+    Args:
+    - markdown_output: bool   If True, return formatted markdown string instead of JSON list (default: False)
+
     Returns:
-    - List of dict entries containing:
-      - name: str
-      - description: str
-      - license: str | None
-      - allowed_tools: list[str] | None
-      - metadata: dict[str, Any] | None
-      - path: str (relative path to SKILL.md within skills dir)
+    - If markdown_output=False: List of dict entries with name, description, license, allowed_tools, metadata, path
+    - If markdown_output=True: formatted markdown string with skill catalog
 
     Usage:
     - Use this to present a catalog of available skills to the agent or user.
+    - Set markdown_output=True for a more readable format.
     """
     skills_dir = _resolve_skills_dir()
     skills = discover_skills(skills_dir)
-    return [
+    skill_list = [
         {
             k: v
             for k, v in s.items()
@@ -732,9 +740,29 @@ def skill_list_all() -> list[dict[str, Any]]:
         for s in skills
     ]
 
+    if not markdown_output:
+        return skill_list
+
+    # Format as markdown
+    lines = ["# Available Skills\n\n"]
+    for skill in skill_list:
+        lines.append(f"## {skill['name']}\n")
+        lines.append(f"{skill['description']}\n\n")
+        if skill.get("license"):
+            lines.append(f"**License:** {skill['license']}  \n")
+        if skill.get("allowed_tools"):
+            lines.append(f"**Allowed Tools:** {', '.join(skill['allowed_tools'])}  \n")
+        if skill.get("path"):
+            lines.append(f"**Path:** `{skill['path']}`  \n")
+        lines.append("\n")
+
+    return "".join(lines)
+
 
 @mcp.tool
-def skill_get_detail(name: str, include_notes: bool = True) -> dict[str, Any]:
+def skill_get_detail(
+    name: str, include_notes: bool = True, markdown_output: bool = False
+) -> dict[str, Any] | str:
     """
     function_purpose: Get full parsed details for a specific skill by name (frontmatter + body + notes).
 
@@ -744,24 +772,50 @@ def skill_get_detail(name: str, include_notes: bool = True) -> dict[str, Any]:
       learnings, improvements, corrections, and examples discovered while using the skill.
 
     Args:
-    - name: str             The hyphen-case name of the skill (must match the skill directory name)
-    - include_notes: bool   If True (default), append notes from _notes/ to the body for complete context
+    - name: str               The hyphen-case name of the skill (must match the skill directory name)
+    - include_notes: bool     If True (default), append notes from _notes/ to the body for complete context
+    - markdown_output: bool   If True, return formatted markdown string instead of JSON dict (default: False)
 
     Returns:
-    - dict containing:
-      - name, description, license?, allowed_tools?, metadata?, path, body (markdown, with notes appended if include_notes=True)
+    - If markdown_output=False: dict containing name, description, license?, allowed_tools?, metadata?, path, body
+    - If markdown_output=True: formatted markdown string with frontmatter and body
 
     Usage:
     - Use this when the agent needs the full guidance text and metadata for a skill.
     - Notes are included by default to ensure the agent sees all relevant context, corrections, and examples.
     - Set include_notes=False only if you want just the core SKILL.md content without historical notes.
+    - Set markdown_output=True to get a readable markdown document instead of JSON structure.
     """
     skills_dir = _resolve_skills_dir()
-    return get_skill(skills_dir, name, include_notes=include_notes)
+    skill = get_skill(skills_dir, name, include_notes=include_notes)
+
+    if not markdown_output:
+        return skill
+
+    # Format as markdown
+    lines = [f"# {skill['name']}\n"]
+    lines.append(f"**Description:** {skill['description']}\n")
+
+    if skill.get("license"):
+        lines.append(f"**License:** {skill['license']}\n")
+
+    if skill.get("allowed_tools"):
+        lines.append(f"**Allowed Tools:** {', '.join(skill['allowed_tools'])}\n")
+
+    if skill.get("metadata"):
+        lines.append(f"**Metadata:** {skill['metadata']}\n")
+
+    lines.append(f"**Path:** {skill['path']}\n")
+    lines.append("\n---\n")
+    lines.append(skill.get("body", ""))
+
+    return "".join(lines)
 
 
 @mcp.tool
-def skill_search_index(query: str) -> list[dict[str, Any]]:
+def skill_search_index(
+    query: str, markdown_output: bool = False
+) -> list[dict[str, Any]] | str:
     """
     function_purpose: Search skills by case-insensitive substring across name, description, and body.
 
@@ -769,23 +823,42 @@ def skill_search_index(query: str) -> list[dict[str, Any]]:
     - Performs a simple substring search across the parsed name, description, and body for each skill.
 
     Args:
-    - query: str (case-insensitive substring)
+    - query: str              Case-insensitive substring
+    - markdown_output: bool   If True, return formatted markdown string instead of JSON list (default: False)
 
     Returns:
-    - List of brief matches with:
-      - name: str
-      - description: str
-      - path: str (relative to skills dir)
+    - If markdown_output=False: List of dicts with name, description, path
+    - If markdown_output=True: formatted markdown string with search results
 
     Usage:
     - Use this to quickly locate relevant skills by topic or keywords.
+    - Set markdown_output=True for a more readable format.
     """
     skills_dir = _resolve_skills_dir()
-    return search_skills(skills_dir, query)
+    results = search_skills(skills_dir, query)
+
+    if not markdown_output:
+        return results
+
+    # Format as markdown
+    if not results:
+        return f"# Search Results for '{query}'\n\nNo matches found.\n"
+
+    lines = [f"# Search Results for '{query}'\n\n"]
+    lines.append(f"Found {len(results)} match(es):\n\n")
+    for skill in results:
+        lines.append(f"## {skill['name']}\n")
+        lines.append(f"{skill['description']}\n\n")
+        if skill.get("path"):
+            lines.append(f"**Path:** `{skill['path']}`\n\n")
+
+    return "".join(lines)
 
 
 @mcp.tool
-def skill_list_assets(name: str) -> list[dict[str, Any]]:
+def skill_list_assets(
+    name: str, markdown_output: bool = False
+) -> list[dict[str, Any]] | str:
     """
     function_purpose: List non-SKILL.md files within a skill folder (recursive).
 
@@ -794,20 +867,40 @@ def skill_list_assets(name: str) -> list[dict[str, Any]]:
     - Useful for discovering supporting artifacts, reference materials, templates, and helper scripts that belong to a skill.
 
     Args:
-    - name: str  The hyphen-case name of the skill whose assets to list.
+    - name: str               The hyphen-case name of the skill whose assets to list
+    - markdown_output: bool   If True, return formatted markdown string instead of JSON list (default: False)
 
     Returns:
-    - list[dict[str, Any]] containing:
-      - path: str        Relative path within the skill directory
-      - size: int | None File size in bytes if available
-      - mime_type: str | None  Best-effort MIME type guess
+    - If markdown_output=False: list of dicts with path, size, mime_type
+    - If markdown_output=True: formatted markdown string with asset listing
 
     Usage:
     - Call before reading assets to present available files to the agent or user.
     - For reading actual content, use skill_read_asset() with the returned path.
+    - Set markdown_output=True for a more readable format.
     """
     skills_dir = _resolve_skills_dir()
-    return list_skill_assets(skills_dir, name)
+    assets = list_skill_assets(skills_dir, name)
+
+    if not markdown_output:
+        return assets
+
+    # Format as markdown
+    if not assets:
+        return f"# Assets for '{name}'\n\nNo assets found.\n"
+
+    lines = [f"# Assets for '{name}'\n\n"]
+    lines.append(f"Found {len(assets)} asset(s):\n\n")
+    lines.append("| Path | Size | MIME Type |\n")
+    lines.append("|------|------|----------|\n")
+    for asset in assets:
+        path = asset.get("path", "")
+        size = asset.get("size")
+        size_str = f"{size:,} bytes" if size is not None else "N/A"
+        mime = asset.get("mime_type") or "unknown"
+        lines.append(f"| `{path}` | {size_str} | {mime} |\n")
+
+    return "".join(lines)
 
 
 @mcp.tool
@@ -1183,34 +1276,36 @@ def skill_store_note(name: str, title: str, content: str) -> dict[str, Any]:
 
 
 @mcp.tool
-def skill_list_notes(name: str) -> list[dict[str, Any]]:
+def skill_list_notes(
+    name: str, markdown_output: bool = False
+) -> list[dict[str, Any]] | str:
     """
-    function_purpose: List notes created under a skill’s _notes directory.
+    function_purpose: List notes created under a skill's _notes directory.
 
     Description:
-    - Enumerates note files stored under a skill’s '_notes' directory. Notes are additive records of
+    - Enumerates note files stored under a skill's '_notes' directory. Notes are additive records of
       learnings, improvements, and scripts created via store_skill_note(), intended to refine or clarify
       skills over time without editing existing files.
 
     Args:
-    - name: str  The hyphen-case skill name (must match the skill directory)
+    - name: str               The hyphen-case skill name (must match the skill directory)
+    - markdown_output: bool   If True, return formatted markdown string instead of JSON list (default: False)
 
     Returns:
-    - list[dict[str, Any]] with:
-      - path: str             Relative path to the note within the skill directory (e.g., "_notes/2025...-title.md")
-      - size: int | None      File size in bytes
-      - title: str | None     Note title if present in frontmatter
-      - created_at: str | None ISO-like timestamp from frontmatter if present
-      - kind: str | None      "note" when created by store_skill_note()
+    - If markdown_output=False: list of dicts with path, size, title, created_at, kind
+    - If markdown_output=True: formatted markdown string with note listing
 
     Usage:
     - Use this to browse available notes and select one to read with skill_read_asset().
+    - Set markdown_output=True for a more readable format.
     """
     skills_dir = _resolve_skills_dir()
     sdir = skill_dir_for_name(skills_dir, name)
     notes_dir = sdir / "_notes"
     results: list[dict[str, Any]] = []
     if not notes_dir.exists():
+        if markdown_output:
+            return f"# Notes for '{name}'\n\nNo notes directory found.\n"
         return results
 
     for f in notes_dir.rglob("*"):
@@ -1261,7 +1356,27 @@ def skill_list_notes(name: str) -> list[dict[str, Any]]:
 
     # Stable ordering by path
     results.sort(key=lambda x: x.get("path") or "")
-    return results
+
+    if not markdown_output:
+        return results
+
+    # Format as markdown
+    if not results:
+        return f"# Notes for '{name}'\n\nNo notes found.\n"
+
+    lines = [f"# Notes for '{name}'\n\n"]
+    lines.append(f"Found {len(results)} note(s):\n\n")
+    lines.append("| Title | Created | Path | Size |\n")
+    lines.append("|-------|---------|------|------|\n")
+    for note in results:
+        title = note.get("title") or "Untitled"
+        created = note.get("created_at") or "N/A"
+        path = note.get("path", "")
+        size = note.get("size")
+        size_str = f"{size:,} bytes" if size is not None else "N/A"
+        lines.append(f"| {title} | {created} | `{path}` | {size_str} |\n")
+
+    return "".join(lines)
 
 
 @mcp.tool
