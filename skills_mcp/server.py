@@ -45,11 +45,16 @@ Entry point: python -m skills_mcp.server
 
 from __future__ import annotations
 
+import argparse
 import base64
+import json
 import logging
 import os
+import shutil
 import subprocess
 import threading
+import time
+from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from mimetypes import guess_type
 from pathlib import Path
@@ -127,10 +132,7 @@ def _log_operation(op: str, payload: dict[str, Any]) -> None:
 
     This is used for trashing skills and assets so that actions are auditable.
     """
-    import json
-    from datetime import datetime, timezone
-
-    ts = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    ts = datetime.now().astimezone().isoformat(timespec="seconds")
     record = {"ts": ts, "op": op}
     record.update(payload)
 
@@ -1136,8 +1138,6 @@ def _add_skill_asset_impl(
     binary = encoding == "base64"
     try:
         if binary:
-            import base64
-
             raw = base64.b64decode(content)
             with open(target, "wb") as f:
                 f.write(raw)
@@ -1280,8 +1280,6 @@ def skill_store_note(name: str, title: str, content: str) -> dict[str, Any]:
       - created: bool     True on success
       - message: str      Status message
     """
-    from datetime import datetime
-
     skills_dir = _resolve_skills_dir()
     sdir = skill_dir_for_name(skills_dir, name)
     notes_dir = sdir / "_notes"
@@ -1300,7 +1298,7 @@ def skill_store_note(name: str, title: str, content: str) -> dict[str, Any]:
         slug = "".join(cleaned).strip("-")
         return slug or "note"
 
-    ts = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    ts = datetime.now().astimezone().strftime("%Y%m%dT%H%M%S%z")
     slug = _slugify(title)[:80]
     filename = f"{ts}-{slug}.md"
     note_path = notes_dir / filename
@@ -1529,9 +1527,6 @@ def skill_trash_user_skill(name: str, force: bool = True) -> dict[str, Any]:
       - trash_path: str | None
       - message: str
     """
-    from datetime import datetime, timezone
-    import shutil
-
     skills_dir = _resolve_skills_dir()
     trash_dir = _resolve_trash_dir()
 
@@ -1568,7 +1563,7 @@ def skill_trash_user_skill(name: str, force: bool = True) -> dict[str, Any]:
             "message": "Set force=True to move skill to trash",
         }
 
-    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    ts = datetime.now().astimezone().strftime("%Y%m%dT%H%M%S%z")
     trash_root = trash_dir / "skills"
     trash_root.mkdir(parents=True, exist_ok=True)
     trash_target = trash_root / f"{ts}__{name}"
@@ -1630,8 +1625,6 @@ def skill_trash_user_asset(name: str, path: str) -> dict[str, Any]:
       - trash_path: str | None
       - message: str
     """
-    from datetime import datetime, timezone
-
     skills_dir = _resolve_skills_dir()
     trash_dir = _resolve_trash_dir()
 
@@ -1732,15 +1725,13 @@ def skill_trash_user_asset(name: str, path: str) -> dict[str, Any]:
             }
 
     # Compute trash target path.
-    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    ts = datetime.now().astimezone().strftime("%Y%m%dT%H%M%S%z")
     trash_root = trash_dir / "assets" / name
     trash_root.mkdir(parents=True, exist_ok=True)
     safe_rel = rel_from_root.replace("/", "__")
     trash_target = trash_root / f"{ts}__{safe_rel}"
 
     try:
-        import shutil
-
         shutil.move(str(target), str(trash_target))
     except Exception as exc:
         _log_operation(
@@ -1818,9 +1809,6 @@ def cli_main() -> None:
       python -m skills_mcp.server --assets <NAME>
       python -m skills_mcp.server --read <NAME> <PATH> [--max-bytes N]
     """
-    import argparse
-    import json
-
     logger = configure_logging()
     skills_dir = _resolve_skills_dir()
 
