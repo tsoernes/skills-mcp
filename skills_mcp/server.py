@@ -399,29 +399,36 @@ def get_skill(
     for skill in discover_skills(skills_dir):
         if skill.get("name") == name:
             if include_notes:
-                # Append notes to the body
+                # Append notes to the body from both _notes/ and notes/ directories
                 skill_root = skill_dir_for_name(skills_dir, name)
-                notes_dir = skill_root / "_notes"
-                if notes_dir.exists() and notes_dir.is_dir():
-                    note_files = sorted(
-                        [f for f in notes_dir.rglob("*") if f.is_file()]
-                    )
-                    if note_files:
-                        notes_section = ["\n\n---\n\n# Notes\n"]
-                        notes_section.append(
-                            "\nThe following notes contain learnings, corrections, improvements, and examples discovered while using this skill:\n"
+                note_files = []
+
+                # Check both _notes/ (programmatic) and notes/ (manual) directories
+                for notes_dirname in ["_notes", "notes"]:
+                    notes_dir = skill_root / notes_dirname
+                    if notes_dir.exists() and notes_dir.is_dir():
+                        note_files.extend(
+                            [f for f in notes_dir.rglob("*") if f.is_file()]
                         )
-                        for note_file in note_files:
-                            try:
-                                note_content = note_file.read_text(encoding="utf-8")
-                                rel_path = note_file.relative_to(skill_root).as_posix()
-                                notes_section.append(
-                                    f"\n## Note: {rel_path}\n\n{note_content}\n"
-                                )
-                            except Exception:
-                                # Skip notes that can't be read
-                                pass
-                        skill["body"] = skill.get("body", "") + "".join(notes_section)
+
+                if note_files:
+                    # Sort all notes together
+                    note_files = sorted(note_files)
+                    notes_section = ["\n\n---\n\n# Notes\n"]
+                    notes_section.append(
+                        "\nThe following notes contain learnings, corrections, improvements, and examples discovered while using this skill:\n"
+                    )
+                    for note_file in note_files:
+                        try:
+                            note_content = note_file.read_text(encoding="utf-8")
+                            rel_path = note_file.relative_to(skill_root).as_posix()
+                            notes_section.append(
+                                f"\n## Note: {rel_path}\n\n{note_content}\n"
+                            )
+                        except Exception:
+                            # Skip notes that can't be read
+                            pass
+                    skill["body"] = skill.get("body", "") + "".join(notes_section)
             return skill
     raise ValueError(f"skill '{name}' not found")
 
@@ -1283,8 +1290,8 @@ def skill_list_notes(
     function_purpose: List notes created under a skill's _notes directory.
 
     Description:
-    - Enumerates note files stored under a skill's '_notes' directory. Notes are additive records of
-      learnings, improvements, and scripts created via store_skill_note(), intended to refine or clarify
+    - Enumerates note files stored under a skill's '_notes' and 'notes' directories. Notes are additive records of
+      learnings, improvements, and scripts created via store_skill_note() or manually, intended to refine or clarify
       skills over time without editing existing files.
 
     Args:
@@ -1301,16 +1308,19 @@ def skill_list_notes(
     """
     skills_dir = _resolve_skills_dir()
     sdir = skill_dir_for_name(skills_dir, name)
-    notes_dir = sdir / "_notes"
     results: list[dict[str, Any]] = []
-    if not notes_dir.exists():
-        if markdown_output:
-            return f"# Notes for '{name}'\n\nNo notes directory found.\n"
-        return results
 
-    for f in notes_dir.rglob("*"):
-        if not f.is_file():
+    # Check both _notes/ and notes/ directories
+    found_any = False
+    for notes_dirname in ["_notes", "notes"]:
+        notes_dir = sdir / notes_dirname
+        if not notes_dir.exists():
             continue
+        found_any = True
+
+        for f in notes_dir.rglob("*"):
+            if not f.is_file():
+                continue
         rel = f.relative_to(sdir).as_posix()
         try:
             size = f.stat().st_size
@@ -1344,15 +1354,20 @@ def skill_list_notes(
             # Ignore parsing errors; still include the file in results
             pass
 
-        results.append(
-            {
-                "path": rel,
-                "size": size,
-                "title": title,
-                "created_at": created_at,
-                "kind": kind,
-            }
-        )
+            results.append(
+                {
+                    "path": rel,
+                    "size": size,
+                    "title": title,
+                    "created_at": created_at,
+                    "kind": kind,
+                }
+            )
+
+    if not found_any:
+        if markdown_output:
+            return f"# Notes for '{name}'\n\nNo notes directory found.\n"
+        return results
 
     # Stable ordering by path
     results.sort(key=lambda x: x.get("path") or "")
@@ -1481,7 +1496,8 @@ def skill_trash_user_asset(name: str, path: str) -> dict[str, Any]:
       * Only assets under reserved user areas are allowed:
         - "_user_assets/" subtree
         - "_user_notes/" subtree
-        - "_notes/" subtree (legacy, for backward compatibility)
+        - "_notes/" subtree (programmatic notes from skill_store_note)
+        - "notes/" subtree (manually created notes)
       * Core assets (including SKILL.md and any other non-user files) cannot be trashed.
     - For user-created skills:
       * Any asset path under the skill directory may be trashed.
@@ -1562,11 +1578,12 @@ def skill_trash_user_asset(name: str, path: str) -> dict[str, Any]:
 
     if is_anthropic:
         # Only user-reserved subtrees allowed for Anthropic skills.
-        # Accept both _notes/ (legacy) and _user_notes/ (new convention)
+        # Accept both _notes/ (programmatic), notes/ (manual), _user_notes/ (new convention), and _user_assets/
         if not (
             rel_from_root.startswith("_user_assets/")
             or rel_from_root.startswith("_user_notes/")
             or rel_from_root.startswith("_notes/")
+            or rel_from_root.startswith("notes/")
         ):
             _log_operation(
                 "skill_trash_user_asset_denied",
@@ -1581,7 +1598,7 @@ def skill_trash_user_asset(name: str, path: str) -> dict[str, Any]:
                 "name": name,
                 "path": path,
                 "trash_path": None,
-                "message": "Only user-created assets/notes under _user_assets/, _user_notes/, or _notes/ may be trashed for Anthropic skills",
+                "message": "Only user-created assets/notes under _user_assets/, _user_notes/, _notes/, or notes/ may be trashed for Anthropic skills",
             }
         if rel_from_root == "SKILL.md":
             _log_operation(
