@@ -1120,45 +1120,14 @@ def skill_create(
     return {"created": True, "path": rel, "message": "Skill created"}
 
 
-@mcp.tool
-def skill_add_asset(
+def _add_skill_asset_impl(
     name: str,
     path: str,
     content: str,
     encoding: str = "text",
     overwrite: bool = False,
 ) -> dict[str, Any]:
-    """
-    function_purpose: Add (or optionally overwrite) a single asset file inside an existing skill directory.
-
-    Description:
-    - Writes a new file under the skill folder (creating parent directories) while enforcing path safety.
-    - Supports text (UTF-8) or base64 content for binary assets (e.g. PDFs, images).
-    - Will not overwrite existing files unless overwrite=True.
-
-    IMPORTANT: After adding an asset, you should ALWAYS create a note (via skill_store_note) documenting:
-    - What the asset contains and its purpose
-    - When and why an agent should load/use it
-    - Any context needed to understand it
-    - Example usage patterns if applicable
-
-    This ensures the asset remains discoverable and properly documented for future use.
-
-    Args:
-    - name: str          Skill name (directory must already exist)
-    - path: str          Relative path inside the skill (e.g. "examples/foo.py")
-    - content: str       Text content or base64 string
-    - encoding: str      "text" (default) or "base64"
-    - overwrite: bool    Allow overwriting when True (default False)
-
-    Returns:
-    - dict with:
-      - written: bool
-      - path: str            Relative normalized path
-      - size: int | None
-      - message: str
-      - binary: bool
-    """
+    """Internal implementation for adding skill assets."""
     skills_dir = _resolve_skills_dir()
     skill_root = skill_dir_for_name(skills_dir, name)
 
@@ -1233,6 +1202,48 @@ def skill_add_asset(
 
 
 @mcp.tool
+def skill_add_asset(
+    name: str,
+    path: str,
+    content: str,
+    encoding: str = "text",
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """
+    function_purpose: Add (or optionally overwrite) a single asset file inside an existing skill directory.
+
+    Description:
+    - Writes a new file under the skill folder (creating parent directories) while enforcing path safety.
+    - Supports text (UTF-8) or base64 content for binary assets (e.g. PDFs, images).
+    - Will not overwrite existing files unless overwrite=True.
+
+    IMPORTANT: After adding an asset, you should ALWAYS create a note (via skill_store_note) documenting:
+    - What the asset contains and its purpose
+    - When and why an agent should load/use it
+    - Any context needed to understand it
+    - Example usage patterns if applicable
+
+    This ensures the asset remains discoverable and properly documented for future use.
+
+    Args:
+    - name: str          Skill name (directory must already exist)
+    - path: str          Relative path inside the skill (e.g. "examples/foo.py")
+    - content: str       Text content or base64 string
+    - encoding: str      "text" (default) or "base64"
+    - overwrite: bool    Allow overwriting when True (default False)
+
+    Returns:
+    - dict with:
+      - written: bool
+      - path: str            Relative normalized path
+      - size: int | None
+      - message: str
+      - binary: bool
+    """
+    return _add_skill_asset_impl(name, path, content, encoding, overwrite)
+
+
+@mcp.tool
 def skill_add_assets(
     name: str,
     assets: list[dict[str, Any]],
@@ -1275,7 +1286,7 @@ def skill_add_assets(
                 }
             )
             continue
-        results.append(skill_add_asset(name, p, c, enc, overwrite))
+        results.append(_add_skill_asset_impl(name, p, c, enc, overwrite))
     return results
 
 
@@ -1400,38 +1411,38 @@ def skill_list_notes(
         for f in notes_dir.rglob("*"):
             if not f.is_file():
                 continue
-        rel = f.relative_to(sdir).as_posix()
-        try:
-            size = f.stat().st_size
-        except OSError:
-            size = None
+            rel = f.relative_to(sdir).as_posix()
+            try:
+                size = f.stat().st_size
+            except OSError:
+                size = None
 
-        title: str | None = None
-        created_at: str | None = None
-        kind: str | None = None
+            title: str | None = None
+            created_at: str | None = None
+            kind: str | None = None
 
-        # Best-effort parse of YAML frontmatter if present
-        try:
-            txt = f.read_text(encoding="utf-8")
-            lines = txt.splitlines(keepends=False)
-            if lines and lines[0].strip() == "---":
-                fm_lines: list[str] = []
-                idx = 1
-                while idx < len(lines) and lines[idx].strip() != "---":
-                    fm_lines.append(lines[idx])
-                    idx += 1
-                if idx < len(lines) and lines[idx].strip() == "---":
-                    fm = yaml.safe_load("\n".join(fm_lines)) or {}
-                    if isinstance(fm, dict):
-                        t = fm.get("title")
-                        ca = fm.get("created_at")
-                        k = fm.get("kind")
-                        title = t if isinstance(t, str) else None
-                        created_at = ca if isinstance(ca, str) else None
-                        kind = k if isinstance(k, str) else None
-        except Exception:
-            # Ignore parsing errors; still include the file in results
-            pass
+            # Best-effort parse of YAML frontmatter if present
+            try:
+                txt = f.read_text(encoding="utf-8")
+                lines = txt.splitlines(keepends=False)
+                if lines and lines[0].strip() == "---":
+                    fm_lines: list[str] = []
+                    idx = 1
+                    while idx < len(lines) and lines[idx].strip() != "---":
+                        fm_lines.append(lines[idx])
+                        idx += 1
+                    if idx < len(lines) and lines[idx].strip() == "---":
+                        fm = yaml.safe_load("\n".join(fm_lines)) or {}
+                        if isinstance(fm, dict):
+                            t = fm.get("title")
+                            ca = fm.get("created_at")
+                            k = fm.get("kind")
+                            title = t if isinstance(t, str) else None
+                            created_at = ca if isinstance(ca, str) else None
+                            kind = k if isinstance(k, str) else None
+            except Exception:
+                # Ignore parsing errors; still include the file in results
+                pass
 
             results.append(
                 {
