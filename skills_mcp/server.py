@@ -128,53 +128,16 @@ def _log_operation(op: str, payload: dict[str, Any]) -> None:
     This is used for trashing skills and assets so that actions are auditable.
     """
     import json
-    from datetime import datetime
+    from datetime import datetime, timezone
 
-    ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    ts = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     record = {"ts": ts, "op": op}
     record.update(payload)
 
     try:
         DEFAULT_LOG_DIR.mkdir(parents=True, exist_ok=True)
         with open(DEFAULT_OPS_LOG_FILE, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
-    except Exception:
-        # Logging must not break the main operation; swallow errors.
-        logging.getLogger(SERVER_NAME).warning(
-            "Failed to write operation log entry", exc_info=True
-        )
-
-
-def _resolve_trash_dir() -> Path:
-    """
-    function_purpose: Resolve the trash directory where deleted skills/assets are moved.
-
-    Uses DEFAULT_TRASH_DIR by default; can be overridden via TRASH_DIR env var.
-    Ensures the directory exists.
-    """
-    trash_env = os.environ.get("TRASH_DIR")
-    trash_dir = Path(trash_env).resolve() if trash_env else DEFAULT_TRASH_DIR
-    trash_dir.mkdir(parents=True, exist_ok=True)
-    return trash_dir
-
-
-def _log_operation(op: str, payload: dict[str, Any]) -> None:
-    """
-    function_purpose: Append a single JSON line describing a destructive operation.
-
-    This is used for trashing skills and assets so that actions are auditable.
-    """
-    import json
-    from datetime import datetime
-
-    ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
-    record = {"ts": ts, "op": op}
-    record.update(payload)
-
-    try:
-        DEFAULT_LOG_DIR.mkdir(parents=True, exist_ok=True)
-        with open(DEFAULT_OPS_LOG_FILE, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            _ = f.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception:
         # Logging must not break the main operation; swallow errors.
         logging.getLogger(SERVER_NAME).warning(
@@ -412,7 +375,7 @@ def get_skill(
                 # 2. User overlay from user-skills/<skill-name>/notes/
                 skill_root = skill_dir_for_name(skills_dir, name)
                 user_skills_dir = _resolve_user_skills_dir()
-                note_files = []
+                note_files: list[Path] = []
 
                 # Check skill's own notes directories
                 for notes_dirname in ["_notes", "notes"]:
@@ -1108,7 +1071,7 @@ def skill_create(
     skill_path = sdir / "SKILL.md"
     try:
         with open(skill_path, "x", encoding="utf-8") as f:
-            f.write(skill_md)
+            _ = f.write(skill_md)
     except Exception as exc:
         return {
             "created": False,
@@ -1355,14 +1318,14 @@ def skill_store_note(name: str, title: str, content: str) -> dict[str, Any]:
 
     try:
         with open(note_path, "x", encoding="utf-8") as f:
-            f.write(body)
+            _ = f.write(body)
         rel = note_path.relative_to(sdir).as_posix()
         return {"path": rel, "created": True, "message": "Note stored"}
     except FileExistsError:
         # Extremely unlikely due to timestamp; retry with suffix
         alt = notes_dir / f"{ts}-{slug}-1.md"
         with open(alt, "x", encoding="utf-8") as f:
-            f.write(body)
+            _ = f.write(body)
         rel = alt.relative_to(sdir).as_posix()
         return {"path": rel, "created": True, "message": "Note stored (with suffix)"}
     except Exception as exc:
@@ -1566,7 +1529,7 @@ def skill_trash_user_skill(name: str, force: bool = True) -> dict[str, Any]:
       - trash_path: str | None
       - message: str
     """
-    from datetime import datetime
+    from datetime import datetime, timezone
     import shutil
 
     skills_dir = _resolve_skills_dir()
@@ -1605,7 +1568,7 @@ def skill_trash_user_skill(name: str, force: bool = True) -> dict[str, Any]:
             "message": "Set force=True to move skill to trash",
         }
 
-    ts = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     trash_root = trash_dir / "skills"
     trash_root.mkdir(parents=True, exist_ok=True)
     trash_target = trash_root / f"{ts}__{name}"
@@ -1667,7 +1630,7 @@ def skill_trash_user_asset(name: str, path: str) -> dict[str, Any]:
       - trash_path: str | None
       - message: str
     """
-    from datetime import datetime
+    from datetime import datetime, timezone
 
     skills_dir = _resolve_skills_dir()
     trash_dir = _resolve_trash_dir()
@@ -1769,7 +1732,7 @@ def skill_trash_user_asset(name: str, path: str) -> dict[str, Any]:
             }
 
     # Compute trash target path.
-    ts = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     trash_root = trash_dir / "assets" / name
     trash_root.mkdir(parents=True, exist_ok=True)
     safe_rel = rel_from_root.replace("/", "__")
