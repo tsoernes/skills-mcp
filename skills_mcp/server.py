@@ -66,7 +66,7 @@ from fastmcp import FastMCP
 
 # --- Paths & constants ---
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_SKILLS_DIR = REPO_ROOT / "skills"
+DEFAULT_SKILLS_DIR = REPO_ROOT / "skills" / "skills"
 DEFAULT_USER_SKILLS_DIR = REPO_ROOT / "user-skills"
 DEFAULT_LOG_DIR = REPO_ROOT / "logs"
 DEFAULT_LOG_FILE = DEFAULT_LOG_DIR / "skills_mcp_server.log"
