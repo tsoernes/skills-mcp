@@ -477,6 +477,24 @@ def skill_dir_for_name(skills_dir: Path, name: str) -> Path:
     raise ValueError(f"skill '{name}' not found")
 
 
+def skill_dir_for_name_any(name: str) -> Path:
+    """
+    function_purpose: Resolve the directory path for a skill by its name, searching both user and bundled skills.
+
+    Searches user-skills directory first, then bundled skills directory.
+    """
+    # Check user-skills directory first
+    user_skills_dir = _resolve_user_skills_dir()
+    try:
+        return skill_dir_for_name(user_skills_dir, name)
+    except ValueError:
+        pass
+
+    # Fall back to bundled skills directory
+    skills_dir = _resolve_skills_dir()
+    return skill_dir_for_name(skills_dir, name)
+
+
 def _is_anthropic_skill(skills_dir: Path, name: str) -> bool:
     """
     function_purpose: Determine if a skill is part of the Anthropic/bundled skills set.
@@ -776,8 +794,21 @@ def skill_list_all(markdown_output: bool = False) -> list[dict[str, Any]] | str:
     - Use this to present a catalog of available skills to the agent or user.
     - Set markdown_output=True for a more readable format.
     """
+    # Discover skills from both bundled and user-skills directories
     skills_dir = _resolve_skills_dir()
-    skills = discover_skills(skills_dir)
+    bundled_skills = discover_skills(skills_dir)
+
+    user_skills_dir = _resolve_user_skills_dir()
+    user_skills = discover_skills(user_skills_dir)
+
+    # Combine, with user skills potentially overriding bundled ones by name
+    skills_by_name = {s["name"]: s for s in bundled_skills}
+    for s in user_skills:
+        skills_by_name[s["name"]] = s  # User skills take precedence
+
+    skills = list(skills_by_name.values())
+    skills.sort(key=lambda s: (s.get("name") or "", s.get("path") or ""))
+
     skill_list = [
         {
             k: v
@@ -1033,9 +1064,13 @@ def skill_create(
             "message": "Skill name cannot start/end with dash",
         }
 
-    skills_dir = _resolve_skills_dir()
-    sdir = skills_dir / name
-    if sdir.exists():
+    # User-created skills should go in the user-skills directory, not bundled skills
+    user_skills_dir = _resolve_user_skills_dir()
+    sdir = user_skills_dir / name
+
+    # Also check if skill exists in bundled skills directory
+    bundled_skills_dir = _resolve_skills_dir()
+    if sdir.exists() or (bundled_skills_dir / name).exists():
         return {"created": False, "path": "", "message": "Skill already exists"}
 
     try:
@@ -1081,7 +1116,7 @@ def skill_create(
             "message": f"Failed to write SKILL.md: {exc}",
         }
 
-    rel = skill_path.relative_to(skills_dir).as_posix()
+    rel = skill_path.relative_to(user_skills_dir).as_posix()
     return {"created": True, "path": rel, "message": "Skill created"}
 
 
@@ -1093,8 +1128,16 @@ def _add_skill_asset_impl(
     overwrite: bool = False,
 ) -> dict[str, Any]:
     """Internal implementation for adding skill assets."""
-    skills_dir = _resolve_skills_dir()
-    skill_root = skill_dir_for_name(skills_dir, name)
+    try:
+        skill_root = skill_dir_for_name_any(name)
+    except ValueError:
+        return {
+            "written": False,
+            "path": path,
+            "size": None,
+            "message": f"skill '{name}' not found",
+            "binary": encoding == "base64",
+        }
 
     if not path or path.startswith("/") or ".." in path:
         return {
@@ -1280,8 +1323,14 @@ def skill_store_note(name: str, title: str, content: str) -> dict[str, Any]:
       - created: bool     True on success
       - message: str      Status message
     """
-    skills_dir = _resolve_skills_dir()
-    sdir = skill_dir_for_name(skills_dir, name)
+    try:
+        sdir = skill_dir_for_name_any(name)
+    except ValueError:
+        return {
+            "path": "",
+            "created": False,
+            "message": f"skill '{name}' not found",
+        }
     notes_dir = sdir / "_notes"
     notes_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1527,12 +1576,11 @@ def skill_trash_user_skill(name: str, force: bool = True) -> dict[str, Any]:
       - trash_path: str | None
       - message: str
     """
-    skills_dir = _resolve_skills_dir()
     trash_dir = _resolve_trash_dir()
 
-    # Anthropic/bundled skills live under the primary skills_dir and must not be trashed.
+    # Find the skill in either user-skills or bundled skills directory
     try:
-        sdir = skill_dir_for_name(skills_dir, name)
+        sdir = skill_dir_for_name_any(name)
     except Exception:
         return {
             "trashed": False,
@@ -1541,9 +1589,9 @@ def skill_trash_user_skill(name: str, force: bool = True) -> dict[str, Any]:
             "message": "Skill not found",
         }
 
-    # If this is an Anthropic/bundled skill, refuse. User-created skills should be placed in a separate
-    # directory tree by configuration if stronger separation is needed.
-    if _is_anthropic_skill(skills_dir, name):
+    # If this is a bundled/Anthropic skill (lives under bundled skills_dir), refuse
+    bundled_skills_dir = _resolve_skills_dir()
+    if _is_anthropic_skill(bundled_skills_dir, name):
         _log_operation(
             "skill_trash_user_skill_denied",
             {"skill": name, "reason": "anthropic_skill"},
