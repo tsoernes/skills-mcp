@@ -1,9 +1,4 @@
 ---
-title: "Smart Async Decorator: Production-Tested Pattern with Complete Test Suite"
-created_at: 20251208T113935+0100
-kind: note
----
----
 title: "Smart Async Decorator: Production-Tested Pattern"
 created_at: 2025-12-08T11:35:00Z
 kind: note

@@ -1,10 +1,5 @@
 ---
 title: "Async Job Progress Tracking for Long-Running MCP Operations"
-created_at: 20251208T123724+0100
-kind: note
----
----
-title: "Async Job Progress Tracking for Long-Running MCP Operations"
 created_at: 2025-12-08T12:36:00Z
 kind: note
 status: production-tested

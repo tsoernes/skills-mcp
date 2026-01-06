@@ -1350,6 +1350,21 @@ def skill_store_note(name: str, title: str, content: str) -> dict[str, Any]:
     filename = f"{ts}-{slug}.md"
     note_path = notes_dir / filename
 
+    # Strip any existing frontmatter from content to prevent double frontmatter
+    content_stripped = content.strip()
+    if content_stripped.startswith("---"):
+        # Find the closing --- of frontmatter
+        lines = content_stripped.split("\n")
+        if len(lines) > 2:
+            # Look for second --- (closing frontmatter)
+            try:
+                end_idx = lines[1:].index("---") + 1
+                # Skip frontmatter and rejoin content
+                content_stripped = "\n".join(lines[end_idx + 1 :]).strip()
+            except ValueError:
+                # No closing ---, treat as regular content
+                pass
+
     # Exclusive create to prevent overwrites
     fm = [
         "---",
@@ -1359,7 +1374,7 @@ def skill_store_note(name: str, title: str, content: str) -> dict[str, Any]:
         "---",
         "",
     ]
-    body = "\n".join(fm) + content.rstrip() + "\n"
+    body = "\n".join(fm) + content_stripped.rstrip() + "\n"
 
     try:
         with open(note_path, "x", encoding="utf-8") as f:
