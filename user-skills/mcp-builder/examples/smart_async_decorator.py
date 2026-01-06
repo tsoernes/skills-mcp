@@ -23,13 +23,12 @@ Usage:
 import asyncio
 import logging
 import os
-import time
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Coroutine
 
 logger = logging.getLogger(__name__)
 
@@ -56,11 +55,19 @@ class JobMeta:
     completed_at: str | None = None
     error: str | None = None
     result: Any = None
-    task: asyncio.Task | None = None
+    task: asyncio.Task[Any] | None = None
 
 
 # Global job registry (replace with your state management)
-STATE = type("State", (), {"jobs": {}, "settings": None})()
+@dataclass
+class AppState:
+    """Global application state."""
+
+    jobs: dict[str, JobMeta] = field(default_factory=dict)
+    settings: Any = None
+
+
+STATE = AppState()
 
 
 def smart_async(
@@ -114,7 +121,7 @@ def smart_async(
 
 
 def _launch_background_job(
-    label: str, coro_factory: Callable[[], Awaitable[Any]]
+    label: str, coro_factory: Callable[[], Coroutine[Any, Any, Any]]
 ) -> dict[str, Any]:
     """Launch a background job and return job_id immediately."""
     job_id = str(uuid.uuid4())
@@ -145,14 +152,15 @@ def _launch_background_job(
 
 
 async def _run_with_time_budget(
-    label: str, timeout_seconds: float, coro_factory: Callable[[], Awaitable[Any]]
+    label: str,
+    timeout_seconds: float,
+    coro_factory: Callable[[], Coroutine[Any, Any, Any]],
 ) -> Any:
     """
     Run a coroutine with a time budget. If it exceeds the budget, launch it as a background job.
     The task is shielded to prevent cancellation when switching to background mode.
     """
-    coro = coro_factory()
-    task = asyncio.create_task(coro)
+    task = asyncio.create_task(coro_factory())
     shielded = asyncio.shield(task)
 
     try:

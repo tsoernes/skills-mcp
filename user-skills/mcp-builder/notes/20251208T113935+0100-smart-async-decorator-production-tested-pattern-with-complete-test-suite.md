@@ -217,15 +217,4 @@ If you have the old `smart_async_shielded_task.py`:
 4. Implement job persistence (`_save_jobs()` function)
 5. Test with the provided test patterns
 
-## Related Patterns
-
-- **Health Check**: Human-readable timestamps in status responses
-- **Job Pruning**: Clean up completed/failed jobs periodically
-- **Progress Tracking**: Optional progress callbacks during execution
-- **Cancellation**: Support for explicit job cancellation
-
-## See Also
-
-- Old note: `smart-async.md` (replaced by this note)
-- Old example: `examples/smart_async_shielded_task.py` (superseded)
-- New example: `examples/smart_async_decorator.py` (production-tested)
+Example: `examples/smart_async_decorator.py` (production-tested)

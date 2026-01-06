@@ -1,6 +1,7 @@
-from dataclasses import dataclass, field
-import os
 import time
+from dataclasses import dataclass, field
+from typing import Any
+
 
 @dataclass
 class AppState:
@@ -10,11 +11,14 @@ class AppState:
     @property
     def server_started_at_iso(self) -> str:
         try:
-            return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(self.server_started_at))
+            return time.strftime(
+                "%Y-%m-%dT%H:%M:%SZ", time.gmtime(self.server_started_at)
+            )
         except Exception:
             return ""
 
-async def health() -> dict:
+
+async def health() -> dict[str, Any]:
     uptime_seconds = time.time() - STATE.server_started_at
     uptime_minutes = uptime_seconds / 60
     uptime_hours = uptime_minutes / 60
@@ -32,5 +36,6 @@ async def health() -> dict:
         "env_missing": [],
         "git_commit": STATE.git_commit,
     }
+
 
 STATE = AppState()

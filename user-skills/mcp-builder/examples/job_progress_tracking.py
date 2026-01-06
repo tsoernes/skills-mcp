@@ -18,11 +18,12 @@ import asyncio
 import contextvars
 import json
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 # --------------------------------------------------------------------------------------
 # Context Variables
@@ -60,7 +61,7 @@ class JobMeta:
     completed_at: str | None = None
     error: str | None = None
     result: Any | None = None
-    task: asyncio.Task | None = None
+    task: asyncio.Task[Any] | None = None
     progress: dict[str, Any] | None = (
         None  # {"current": 5, "total": 100, "message": "..."}
     )
@@ -190,7 +191,7 @@ def job_status(job_id: str) -> dict[str, Any]:
 async def generate_questions(
     num_questions: int,
     progress_callback: Callable[[int, int, str | None], None] | None = None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """
     Simulate generating questions with progress reporting.
 
@@ -227,7 +228,7 @@ async def generate_questions(
 async def process_items_concurrent(
     items: list[str],
     progress_callback: Callable[[int, int, str | None], None] | None = None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """
     Process items concurrently with progress tracking.
 
