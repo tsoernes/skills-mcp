@@ -102,7 +102,7 @@ def _save_jobs() -> None:
         for j in STATE.jobs.values()
     ]
 
-    jobs_path.write_text(json.dumps(serializable, indent=2))
+    _ = jobs_path.write_text(json.dumps(serializable, indent=2))
     print(f"💾 Saved {len(serializable)} jobs to {jobs_path}")
 
 
@@ -151,7 +151,7 @@ def _launch_background_job(
 
     async def _run_job():
         # KEY: Set the job_id in context for progress tracking
-        current_job_id.set(job_id)
+        _ = current_job_id.set(job_id)
 
         job.status = JobStatus.RUNNING
         job.started_at = datetime.now().isoformat()
@@ -364,7 +364,7 @@ async def demo_progress_tracking():
     print(f"🚀 Job launched: {job_id}")
 
     # Poll for progress
-    for i in range(15):
+    for _ in range(15):
         await asyncio.sleep(0.5)
         status = job_status(job_id)
 
@@ -390,7 +390,7 @@ async def demo_progress_tracking():
     print(f"🚀 Job launched: {job_id}")
 
     # Poll for progress
-    for i in range(15):
+    for _ in range(15):
         await asyncio.sleep(0.3)
         status = job_status(job_id)
 

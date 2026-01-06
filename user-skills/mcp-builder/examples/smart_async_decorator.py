@@ -193,7 +193,7 @@ async def _run_with_time_budget(
                 job.completed_at = datetime.now().isoformat()
                 logger.exception(f"Background job {job_id} ({label}) failed")
 
-        asyncio.create_task(_finalize())
+        _ = asyncio.create_task(_finalize())
         return {
             "job_id": job_id,
             "status": "running",

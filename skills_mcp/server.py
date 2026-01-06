@@ -572,7 +572,7 @@ def _is_text_data(data: bytes, mime_type: str | None) -> bool:
     ):
         return True
     try:
-        data.decode("utf-8")
+        _ = data.decode("utf-8")
         return True
     except UnicodeDecodeError:
         return False
@@ -1181,11 +1181,11 @@ def _add_skill_asset_impl(
         if binary:
             raw = base64.b64decode(content)
             with open(target, "wb") as f:
-                f.write(raw)
+                _ = f.write(raw)
             size = len(raw)
         else:
             with open(target, "w", encoding="utf-8") as f:
-                f.write(content)
+                _ = f.write(content)
             size = target.stat().st_size
     except Exception as exc:
         return {
@@ -1617,7 +1617,7 @@ def skill_trash_user_skill(name: str, force: bool = True) -> dict[str, Any]:
     try:
         shutil.move(str(sdir), str(trash_target))
     except Exception as exc:
-        _log_operation(
+        _ = _log_operation(
             "skill_trash_user_skill_error",
             {"skill": name, "error": str(exc)},
         )
@@ -1780,7 +1780,7 @@ def skill_trash_user_asset(name: str, path: str) -> dict[str, Any]:
     try:
         shutil.move(str(target), str(trash_target))
     except Exception as exc:
-        _log_operation(
+        _ = _log_operation(
             "skill_trash_user_asset_error",
             {
                 "skill": name,
@@ -1862,29 +1862,31 @@ def cli_main() -> None:
         prog="skills_mcp.server",
         description="Inspect Claude skills (Agent Skills Spec) or start stdio MCP server.",
     )
-    parser.add_argument(
+    _ = parser.add_argument(
         "--list", action="store_true", help="List all discovered skills and exit"
     )
-    parser.add_argument(
+    _ = parser.add_argument(
         "--detail", metavar="NAME", help="Show full details for a specific skill name"
     )
-    parser.add_argument("--search", metavar="QUERY", help="Search skills by substring")
-    parser.add_argument(
+    _ = parser.add_argument(
+        "--search", metavar="QUERY", help="Search skills by substring"
+    )
+    _ = parser.add_argument(
         "--assets", metavar="NAME", help="List non-SKILL.md assets inside the skill"
     )
-    parser.add_argument(
+    _ = parser.add_argument(
         "--read",
         nargs=2,
         metavar=("NAME", "PATH"),
         help="Read asset PATH within the skill NAME",
     )
-    parser.add_argument(
+    _ = parser.add_argument(
         "--max-bytes",
         type=int,
         default=8_388_608,
         help="Maximum bytes to read for assets",
     )
-    parser.add_argument(
+    _ = parser.add_argument(
         "--serve",
         action="store_true",
         help="Start MCP stdio server (default when no flags used)",
