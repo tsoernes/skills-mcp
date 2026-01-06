@@ -28,17 +28,29 @@ import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import StrEnum
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
+class JobStatus(StrEnum):
+    """Job status enum."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
 @dataclass
 class JobMeta:
     """Job metadata for tracking async operations."""
+
     id: str
     label: str
-    status: str = "pending"
+    status: JobStatus = JobStatus.PENDING
     created_at: str | None = None
     started_at: str | None = None
     completed_at: str | None = None
@@ -51,20 +63,22 @@ class JobMeta:
 STATE = type("State", (), {"jobs": {}, "settings": None})()
 
 
-def smart_async(timeout_env: str = "SMART_ASYNC_TIMEOUT_SECONDS", default_timeout: float = 50.0):
+def smart_async(
+    timeout_env: str = "SMART_ASYNC_TIMEOUT_SECONDS", default_timeout: float = 50.0
+):
     """
     Decorator to apply shielded time-threshold smart async to long-running MCP tools.
-    
+
     - If async_mode=True, launch the job in background immediately.
     - Otherwise, attempt synchronous completion under the configured time budget and
       switch to background on timeout without cancelling/restarting the underlying task.
-    
+
     This decorator preserves the original function signature for FastMCP compatibility.
-    
+
     Args:
         timeout_env: Environment variable name for timeout configuration
         default_timeout: Default timeout in seconds if env var not set
-    
+
     Returns:
         Decorated function that handles both sync and async execution
     """
@@ -99,27 +113,29 @@ def smart_async(timeout_env: str = "SMART_ASYNC_TIMEOUT_SECONDS", default_timeou
     return _decorator
 
 
-def _launch_background_job(label: str, coro_factory: Callable[[], Awaitable[Any]]) -> dict[str, Any]:
+def _launch_background_job(
+    label: str, coro_factory: Callable[[], Awaitable[Any]]
+) -> dict[str, Any]:
     """Launch a background job and return job_id immediately."""
     job_id = str(uuid.uuid4())
     job = JobMeta(
         id=job_id,
         label=label,
-        status="pending",
+        status=JobStatus.PENDING,
         created_at=datetime.now().isoformat(),
     )
     STATE.jobs[job_id] = job
 
     async def _run_job():
-        job.status = "running"
+        job.status = JobStatus.RUNNING
         job.started_at = datetime.now().isoformat()
         try:
             result = await coro_factory()
-            job.status = "completed"
+            job.status = JobStatus.COMPLETED
             job.result = result
             job.completed_at = datetime.now().isoformat()
         except Exception as e:
-            job.status = "failed"
+            job.status = JobStatus.FAILED
             job.error = str(e)
             job.completed_at = datetime.now().isoformat()
             logger.exception(f"Job {job_id} ({label}) failed")
@@ -142,13 +158,15 @@ async def _run_with_time_budget(
     try:
         return await asyncio.wait_for(shielded, timeout=timeout_seconds)
     except asyncio.TimeoutError:
-        logger.info(f"Task '{label}' exceeded {timeout_seconds}s budget, switching to background")
+        logger.info(
+            f"Task '{label}' exceeded {timeout_seconds}s budget, switching to background"
+        )
         # Task continues running; wrap it in a job
         job_id = str(uuid.uuid4())
         job = JobMeta(
             id=job_id,
             label=label,
-            status="running",
+            status=JobStatus.RUNNING,
             created_at=datetime.now().isoformat(),
             started_at=datetime.now().isoformat(),
         )
@@ -158,17 +176,21 @@ async def _run_with_time_budget(
         async def _finalize():
             try:
                 result = await task
-                job.status = "completed"
+                job.status = JobStatus.COMPLETED
                 job.result = result
                 job.completed_at = datetime.now().isoformat()
             except Exception as e:
-                job.status = "failed"
+                job.status = JobStatus.FAILED
                 job.error = str(e)
                 job.completed_at = datetime.now().isoformat()
                 logger.exception(f"Background job {job_id} ({label}) failed")
 
         asyncio.create_task(_finalize())
-        return {"job_id": job_id, "status": "running", "message": "Task exceeded time budget; running in background"}
+        return {
+            "job_id": job_id,
+            "status": "running",
+            "message": "Task exceeded time budget; running in background",
+        }
 
 
 # Example usage
@@ -181,13 +203,13 @@ async def example_tool(
 ) -> dict[str, Any]:
     """
     Example tool using the smart_async decorator.
-    
+
     Args:
         param: Some parameter for your tool
         duration: How long the operation takes (for testing)
         async_mode: If True, launch in background immediately
         job_label: Optional label for job tracking
-    
+
     Returns:
         Result dict (or job metadata if async)
     """
@@ -201,7 +223,7 @@ def job_status(job_id: str) -> dict[str, Any]:
     job = STATE.jobs.get(job_id)
     if not job:
         return {"error": "Job not found"}
-    
+
     return {
         "job": {
             "id": job.id,
@@ -221,7 +243,7 @@ async def main():
     # Fast task - completes synchronously
     result1 = await example_tool(param="fast", duration=1.0)
     print(f"Fast result: {result1}")
-    
+
     # Slow task - goes to background after timeout
     result2 = await example_tool(param="slow", duration=60.0)
     print(f"Slow result: {result2}")
@@ -230,7 +252,7 @@ async def main():
         await asyncio.sleep(5)
         status = job_status(result2["job_id"])
         print(f"Job status: {status}")
-    
+
     # Explicit async - launches immediately
     result3 = await example_tool(param="explicit", duration=5.0, async_mode=True)
     print(f"Explicit async: {result3}")
