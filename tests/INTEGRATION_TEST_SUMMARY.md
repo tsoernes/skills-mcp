@@ -91,6 +91,59 @@ python tests/stdio_test_client.py --test list_tools
 - CI/CD integration examples
 - Performance benchmarks
 
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Test Clients                              │
+├─────────────────────────┬───────────────────────────────────────┤
+│  test_stdio_integration │      stdio_test_client.py             │
+│  (pytest suite)         │      (standalone client)              │
+│                         │                                       │
+│  • 18 automated tests   │  • 8 automated tests                  │
+│  • CI/CD integration    │  • Interactive REPL                   │
+│  • Fixtures & mocking   │  • Colored output                     │
+│  • Coverage reports     │  • Manual debugging                   │
+└─────────────────────────┴───────────────────────────────────────┘
+                            │
+                            │ Both use MCPStdioClient
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      MCPStdioClient                              │
+│  • JSON-RPC 2.0 message framing                                 │
+│  • stdin/stdout subprocess communication                        │
+│  • MCP protocol handshake (initialize + notifications)          │
+│  • Error handling (protocol + tool execution)                   │
+│  • Content format support (structured + text)                   │
+└─────────────────────────────────────────────────────────────────┘
+                            │
+                            │ stdin/stdout
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│              skills-mcp Server (FastMCP)                        │
+│  python -m skills_mcp.server                                    │
+│                                                                  │
+│  • MCP protocol handler (FastMCP framework)                     │
+│  • 13 exposed tools (skill_list_all, skill_get_detail, etc.)   │
+│  • JSON-RPC request routing                                     │
+│  • Tool invocation and result formatting                        │
+│  • Error handling and validation                                │
+└─────────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    Skills Directory                              │
+│  /skills/                                                        │
+│  ├── algorithmic-art/                                           │
+│  │   ├── SKILL.md                                               │
+│  │   └── assets/                                                │
+│  ├── docx/                                                       │
+│  │   ├── SKILL.md                                               │
+│  │   └── examples/                                              │
+│  └── ...                                                         │
+└─────────────────────────────────────────────────────────────────┘
+```
+
 ## Implementation Highlights
 
 ### MCP Protocol Compliance
