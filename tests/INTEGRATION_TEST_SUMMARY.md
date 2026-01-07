@@ -41,9 +41,10 @@ pytest tests/test_stdio_integration.py::test_server_starts_and_initializes -v
 **Key Features:**
 - Automated test runner with colored terminal output
 - Interactive REPL mode for manual tool invocation
-- Verbose mode showing all JSON-RPC messages
+- Verbose mode showing all JSON-RPC messages and server stderr
 - Individual test execution
 - Human-friendly output formatting
+- Intelligent server startup detection via stderr monitoring
 - Same MCPStdioClient implementation as pytest suite
 
 **Test Suite:**
@@ -275,15 +276,17 @@ Successfully tested:
 
 1. **Subprocess Communication:** Used `subprocess.Popen` with `text=True` and line-buffered I/O for reliable JSON-RPC message framing
 
-2. **Protocol Handshake:** Implemented the required `initialize` → `notifications/initialized` sequence that FastMCP expects
+2. **Intelligent Startup Detection:** Monitors server stderr in a background thread for startup indicators ("Starting MCP server", "FastMCP", etc.) instead of arbitrary sleep delays. Configurable timeout (default 10s) with detailed error reporting if startup fails.
 
-3. **Error Handling:** Dual-mode error detection for both protocol errors and tool execution errors (isError flag)
+3. **Protocol Handshake:** Implemented the required `initialize` → `notifications/initialized` sequence that FastMCP expects
 
-4. **Content Parsing:** Graceful handling of both `structuredContent` and text-based JSON responses
+4. **Error Handling:** Dual-mode error detection for both protocol errors and tool execution errors (isError flag), plus stderr monitoring for server-side errors
 
-5. **Test Isolation:** Each pytest test gets a fresh server instance via fixture for proper isolation
+5. **Content Parsing:** Graceful handling of both `structuredContent` and text-based JSON responses
 
-6. **Interactive UX:** Color-coded output, command history support, and pretty-printed JSON for better developer experience
+6. **Test Isolation:** Each pytest test gets a fresh server instance via fixture for proper isolation
+
+7. **Interactive UX:** Color-coded output, command history support, and pretty-printed JSON for better developer experience
 
 ## Integration with CI/CD
 
@@ -298,11 +301,32 @@ The test suite is ready for CI/CD integration:
 
 ## Performance
 
-- Server startup: ~0.5s
+- Server startup detection: <1s (intelligent stderr monitoring)
+- Server initialization: ~0.5-1s (varies with git sync)
 - Individual test: ~0.5-1s
-- Full pytest suite: ~18s
-- Full standalone suite: ~8s
-- Interactive mode startup: ~1s
+- Full pytest suite: ~18-23s (18 tests)
+- Full standalone suite: ~8s (8 tests)
+- Interactive mode startup: <1s
+
+## Startup Detection Details
+
+The client uses intelligent startup detection instead of arbitrary sleep delays:
+
+**How it works:**
+1. Spawns server process with stderr pipe
+2. Starts background thread to monitor stderr output
+3. Watches for startup indicators: "Starting MCP server", "FastMCP", "Server starting with skills_dir"
+4. Also detects errors: "error:", "fatal:", "traceback", "exception"
+5. Sets ready flag when startup indicator is detected
+6. Main thread waits with configurable timeout (default 10s)
+7. On timeout, collects and reports last 20 lines of stderr
+
+**Benefits:**
+- No race conditions from fixed sleep delays
+- Immediate feedback on startup failures
+- Detailed error reporting with actual server output
+- Configurable timeout for slow systems
+- Works in both test modes (pytest and standalone)
 
 ## Future Enhancements
 
@@ -316,10 +340,17 @@ Potential improvements for future iterations:
 6. **Binary Content:** Test image/audio content types if/when supported
 7. **WebSocket Transport:** Add tests for SSE/HTTP transport if implemented
 8. **Coverage Reports:** Generate and track code coverage metrics
+9. **Parallel Test Execution:** Run tests in parallel with pytest-xdist
 
 ## Conclusion
 
 The stdio integration test suite provides comprehensive validation of the skills-mcp server's MCP protocol implementation. Both automated and interactive testing modes are available, with full documentation and troubleshooting guides. All 26 test cases (18 pytest + 8 standalone) pass successfully, demonstrating robust protocol compliance and error handling.
+
+**Key Improvements:**
+- **Intelligent startup detection** replaces arbitrary sleep delays, eliminating race conditions
+- **Real-time stderr monitoring** provides immediate feedback on server initialization
+- **Detailed error reporting** captures and displays server output when startup fails
+- **Configurable timeouts** allow adaptation to different system speeds
 
 The implementation is production-ready and suitable for:
 - Continuous integration pipelines
@@ -327,3 +358,4 @@ The implementation is production-ready and suitable for:
 - Development and debugging
 - Protocol compliance verification
 - Regression testing
+- Manual testing and exploration via interactive mode

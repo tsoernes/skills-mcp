@@ -26,8 +26,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import select
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -74,15 +76,74 @@ class MCPStdioClient:
         self.verbose = verbose
         self.process: subprocess.Popen | None = None
         self.request_id = 0
+        self.stderr_buffer: list[str] = []
+        self.stderr_thread: threading.Thread | None = None
+        self.server_ready = threading.Event()
 
     def log(self, message: str, color: str = "") -> None:
         """Log a message if verbose mode is enabled."""
         if self.verbose:
             print(f"{color}{message}{Colors.ENDC}")
 
-    def start(self) -> None:
-        """Start the MCP server process."""
+    def _monitor_stderr(self) -> None:
+        """Monitor stderr for server startup messages and errors."""
+        if not self.process or not self.process.stderr:
+            return
+
+        startup_indicators = [
+            "Starting MCP server",
+            "FastMCP",
+            "Server starting with skills_dir",
+        ]
+
+        try:
+            for line in iter(self.process.stderr.readline, ""):
+                if not line:
+                    break
+
+                self.stderr_buffer.append(line)
+
+                # Log stderr in verbose mode
+                if self.verbose:
+                    print(f"{Colors.WARNING}[stderr] {line.rstrip()}{Colors.ENDC}")
+
+                # Check for startup indicators
+                if not self.server_ready.is_set():
+                    for indicator in startup_indicators:
+                        if indicator in line:
+                            self.log(
+                                f"Server ready (detected: '{indicator}')",
+                                Colors.OKGREEN,
+                            )
+                            self.server_ready.set()
+                            break
+
+                # Check for fatal errors
+                if any(
+                    err in line.lower()
+                    for err in ["error:", "fatal:", "traceback", "exception"]
+                ):
+                    if self.verbose:
+                        self.log(f"Server error detected: {line.rstrip()}", Colors.FAIL)
+
+        except Exception as e:
+            if self.verbose:
+                self.log(f"stderr monitoring error: {e}", Colors.FAIL)
+
+    def start(self, timeout: float = 10.0) -> None:
+        """
+        Start the MCP server process and wait for it to be ready.
+
+        Args:
+            timeout: Maximum time to wait for server startup (default 10s)
+
+        Raises:
+            RuntimeError: If server fails to start within timeout
+        """
         self.log(f"Starting server: {' '.join(self.command)}", Colors.OKCYAN)
+        self.server_ready.clear()
+        self.stderr_buffer = []
+
         self.process = subprocess.Popen(
             self.command,
             stdin=subprocess.PIPE,
@@ -92,7 +153,21 @@ class MCPStdioClient:
             text=True,
             bufsize=1,
         )
-        time.sleep(0.5)
+
+        # Start stderr monitoring thread
+        self.stderr_thread = threading.Thread(target=self._monitor_stderr, daemon=True)
+        self.stderr_thread.start()
+
+        # Wait for server to be ready
+        if not self.server_ready.wait(timeout=timeout):
+            # Server didn't start in time - collect stderr
+            error_output = "".join(self.stderr_buffer[-20:])  # Last 20 lines
+            self.stop()
+            raise RuntimeError(
+                f"Server failed to start within {timeout}s. "
+                f"stderr output:\n{error_output}"
+            )
+
         self.log("Server started successfully", Colors.OKGREEN)
 
     def stop(self) -> None:
@@ -107,8 +182,14 @@ class MCPStdioClient:
                 self.log("Server did not stop gracefully, killing...", Colors.WARNING)
                 self.process.kill()
                 self.process.wait()
+            except Exception as e:
+                self.log(f"Error stopping server: {e}", Colors.FAIL)
             finally:
                 self.process = None
+
+        # Wait for stderr thread to finish
+        if self.stderr_thread and self.stderr_thread.is_alive():
+            self.stderr_thread.join(timeout=1.0)
 
     def _next_request_id(self) -> int:
         """Generate next request ID."""
@@ -595,7 +676,7 @@ def main() -> int:
     )
 
     try:
-        client.start()
+        client.start(timeout=15.0)
 
         if args.interactive:
             interactive_mode(client)
@@ -619,8 +700,15 @@ def main() -> int:
             success = runner.run_all_tests()
             return 0 if success else 1
 
+    except RuntimeError as e:
+        print(f"{Colors.FAIL}Failed to start server: {e}{Colors.ENDC}")
+        return 1
     except Exception as e:
         print(f"{Colors.FAIL}Error: {e}{Colors.ENDC}")
+        import traceback
+
+        if args.verbose:
+            traceback.print_exc()
         return 1
     finally:
         client.stop()

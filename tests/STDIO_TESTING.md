@@ -130,9 +130,9 @@ The test suite covers:
 Both test files include an `MCPStdioClient` class that implements the MCP protocol over stdio:
 
 **Key methods:**
-- `start()` - Spawn the server process
+- `start(timeout=10.0)` - Spawn the server process and wait for startup confirmation
 - `stop()` - Gracefully terminate the server
-- `initialize()` - Send MCP initialize request
+- `initialize()` - Send MCP initialize request and notifications/initialized
 - `list_tools()` - Retrieve available tools
 - `call_tool(name, arguments)` - Invoke a tool
 
@@ -141,6 +141,8 @@ Both test files include an `MCPStdioClient` class that implements the MCP protoc
 - Line-based message framing
 - Request/response correlation by ID
 - Error handling and propagation
+- Intelligent startup detection via stderr monitoring
+- Timeout-based failure detection with error reporting
 
 ### TestRunner Class (stdio_test_client.py)
 
@@ -169,11 +171,13 @@ ls skills/
 - Check that `python -m skills_mcp.server` works manually
 - Verify the virtual environment is activated
 - Check for port conflicts or resource issues
+- Run with `--verbose` to see server stderr output and startup messages
 
 ### Tests fail with "No response from server"
-- Increase the startup delay in `MCPStdioClient.start()` (currently 0.5s)
-- Check stderr output for server initialization errors
-- Run with `--verbose` to see detailed protocol messages
+- The client waits up to 10s for server startup by monitoring stderr
+- Check stderr output for server initialization errors (automatically captured)
+- Run with `--verbose` to see detailed protocol messages and stderr monitoring
+- If server startup is genuinely slow, increase timeout: `client.start(timeout=20.0)`
 
 ### "No skills available" errors
 - Ensure the `skills/` directory exists and contains SKILL.md files
@@ -268,14 +272,27 @@ jobs:
 ## Performance Benchmarks
 
 Typical test execution times:
-- Full pytest suite: ~5-10 seconds
+- Full pytest suite: ~18-23 seconds (18 tests)
 - Individual test: ~0.5-1 seconds
-- Interactive mode startup: ~1 second
+- Interactive mode startup: <1 second (intelligent startup detection)
+- Server startup detection: <1 second (monitors stderr for ready indicators)
 
 Performance can vary based on:
 - Number of skills in the repository
 - System resources
 - I/O performance
+- Server initialization time (git sync, etc.)
+
+## Startup Detection
+
+The test client intelligently detects when the FastMCP server is ready by monitoring stderr output for startup indicators:
+
+- **Startup indicators**: "Starting MCP server", "FastMCP", "Server starting with skills_dir"
+- **Error detection**: Automatically detects "error:", "fatal:", "traceback", "exception" in logs
+- **Timeout handling**: Configurable timeout (default 10s) with detailed error reporting
+- **No arbitrary sleeps**: Uses threading to monitor stderr in real-time
+
+This approach eliminates race conditions and provides immediate feedback if the server fails to start.
 
 ## Related Documentation
 

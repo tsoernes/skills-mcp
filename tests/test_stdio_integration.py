@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -49,9 +50,50 @@ class MCPStdioClient:
         self.cwd = cwd
         self.process: subprocess.Popen | None = None
         self.request_id = 0
+        self.stderr_buffer: list[str] = []
+        self.stderr_thread: threading.Thread | None = None
+        self.server_ready = threading.Event()
 
-    def start(self) -> None:
-        """Start the server process."""
+    def _monitor_stderr(self) -> None:
+        """Monitor stderr for server startup messages and errors."""
+        if not self.process or not self.process.stderr:
+            return
+
+        startup_indicators = [
+            "Starting MCP server",
+            "FastMCP",
+            "Server starting with skills_dir",
+        ]
+
+        try:
+            for line in iter(self.process.stderr.readline, ""):
+                if not line:
+                    break
+
+                self.stderr_buffer.append(line)
+
+                # Check for startup indicators
+                if not self.server_ready.is_set():
+                    for indicator in startup_indicators:
+                        if indicator in line:
+                            self.server_ready.set()
+                            break
+        except Exception:
+            pass  # Ignore stderr monitoring errors in tests
+
+    def start(self, timeout: float = 10.0) -> None:
+        """
+        Start the server process and wait for it to be ready.
+
+        Args:
+            timeout: Maximum time to wait for server startup (default 10s)
+
+        Raises:
+            RuntimeError: If server fails to start within timeout
+        """
+        self.server_ready.clear()
+        self.stderr_buffer = []
+
         self.process = subprocess.Popen(
             self.command,
             stdin=subprocess.PIPE,
@@ -61,8 +103,20 @@ class MCPStdioClient:
             text=True,
             bufsize=1,
         )
-        # Give server a moment to initialize
-        time.sleep(0.5)
+
+        # Start stderr monitoring thread
+        self.stderr_thread = threading.Thread(target=self._monitor_stderr, daemon=True)
+        self.stderr_thread.start()
+
+        # Wait for server to be ready
+        if not self.server_ready.wait(timeout=timeout):
+            # Server didn't start in time - collect stderr
+            error_output = "".join(self.stderr_buffer[-20:])  # Last 20 lines
+            self.stop()
+            raise RuntimeError(
+                f"Server failed to start within {timeout}s. "
+                f"stderr output:\n{error_output}"
+            )
 
     def stop(self) -> None:
         """Stop the server process gracefully."""
@@ -73,8 +127,14 @@ class MCPStdioClient:
             except subprocess.TimeoutExpired:
                 self.process.kill()
                 self.process.wait()
+            except Exception:
+                pass  # Ignore errors during shutdown in tests
             finally:
                 self.process = None
+
+        # Wait for stderr thread to finish
+        if self.stderr_thread and self.stderr_thread.is_alive():
+            self.stderr_thread.join(timeout=1.0)
 
     def _next_request_id(self) -> int:
         """Generate next request ID."""
